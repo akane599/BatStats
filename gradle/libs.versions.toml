@@ -20,13 +20,13 @@ workRuntimeKtx = "2.11.2"
 kotlin = "2.4.10"
 kotlin-ksp = "2.3.11"
 constraintlayoutComposeAndroid = "1.1.2"
-androidbrowserhelper = "2.7.2"
+androidbrowserhelper = "2.7.3"
 datastorePreferencesCore = "1.2.1"
 animation = "1.11.4"
 shizuku = "13.1.5"
 documentfile = "1.1.0"
 apkDist = "0.5.2"
-composeBom = "2026.07.01"
+composeBom = "2026.08.00"
 
 [libraries]
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom-alpha", version.ref = "composeBom" }

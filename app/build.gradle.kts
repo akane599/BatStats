@@ -27,11 +27,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "app.batstats"
+        applicationId = "org.mlm.batstats"
         minSdk = 26
         targetSdk = 37
-        versionCode = 640
-        versionName = "6.1.1"
+        versionCode = 664
+        versionName = "6.1.3"
 
         androidResources {
             localeFilters += setOf("en", "ar", "de", "es-rES", "es-rUS", "fr", "hr", "hu", "in", "it", "ja", "pl", "pt-rBR", "ru-rRU", "sv", "tr", "uk", "zh")

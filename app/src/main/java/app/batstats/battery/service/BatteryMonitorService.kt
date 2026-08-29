@@ -11,6 +11,7 @@ import app.batstats.battery.drain.DrainNotificationManager
 import app.batstats.battery.shizuku.BstatsCollector
 import app.batstats.battery.shizuku.ShizukuBridge
 import app.batstats.battery.util.Notifier
+import app.batstats.battery.util.ShellRunner
 import app.batstats.battery.widget.WidgetUpdater
 import app.batstats.insights.ForegroundDrainTracker
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +29,7 @@ class BatteryMonitorService : Service() {
     private val advancedDrainTracker: AdvancedDrainTracker by inject()
     private val drainNotificationManager: DrainNotificationManager by inject()
     private val shizukuBridge: ShizukuBridge by inject()
+    private val shellRunner: ShellRunner by inject()
     private val enhancedCollector: BstatsCollector by inject()
 
     private var useAdvancedNotification = false
@@ -42,15 +44,15 @@ class BatteryMonitorService : Service() {
             val settings = BatteryGraph.settings.flow.first()
             useAdvancedNotification = settings.showDrainNotification
 
-            val hasShizuku = shizukuBridge.ping() && shizukuBridge.hasPermission()
+            val hasAdvanced = shellRunner.hasAnyPrivilegedAccess()
 
-            val notif = if (useAdvancedNotification && hasShizuku) {
+            val notif = if (useAdvancedNotification && hasAdvanced) {
                 drainNotificationManager.getNotification()
             } else {
                 Notifier.monitoringNotification(this@BatteryMonitorService, "Starting…")
             }
 
-            val notifId = if (useAdvancedNotification && hasShizuku) {
+            val notifId = if (useAdvancedNotification && hasAdvanced) {
                 DrainNotificationManager.NOTIFICATION_ID
             } else {
                 Notifier.NOTIF_ID
@@ -75,7 +77,7 @@ class BatteryMonitorService : Service() {
             BatteryGraph.repo.startSampling()
 
             // Auto-detect drain mode strategy
-            if (hasShizuku) {
+            if (hasAdvanced) {
                 drainTracker.stop()
                 advancedDrainTracker.start()
 
@@ -102,7 +104,7 @@ class BatteryMonitorService : Service() {
                 rt.sample?.let { WidgetUpdater.push(this@BatteryMonitorService, it) }
 
                 // Update standard notification if not using advanced
-                if (!useAdvancedNotification || !hasShizuku) {
+                if (!useAdvancedNotification || !hasAdvanced) {
                     val text = if (rt.sample == null)
                         "Waiting for battery data…"
                     else

@@ -1,5 +1,6 @@
 package app.batstats.battery.util
 
+import android.content.Context
 import android.util.Log
 import app.batstats.battery.data.db.BatteryDatabase
 import app.batstats.battery.shizuku.ShizukuBridge
@@ -12,12 +13,15 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Collects comprehensive battery stats using Shizuku.
+ * Collects comprehensive battery stats using Root/Shizuku/ADB-granted DUMP.
  * Provides parsed data for the detailed stats screen.
  */
 class DetailedStatsCollector(
-    private val shizuku: ShizukuBridge,
-    private val db: BatteryDatabase
+    private val shellRunner: ShellRunner,
+    private val db: BatteryDatabase,
+    private val context: Context,
+    // NOTE: only for direct checks (if later used)
+    private val shizuku: ShizukuBridge? = null
 ) {
     companion object {
         private const val TAG = "DetailedStatsCollector"
@@ -55,69 +59,53 @@ class DetailedStatsCollector(
         Log.d(TAG, "Starting refresh...")
 
         return try {
-            if (!shizuku.ping()) {
-                _error.value = "Shizuku not running. Please start Shizuku app."
-                Log.e(TAG, "Shizuku not running")
-                return false
-            }
-
-            if (!shizuku.hasPermission()) {
-                _error.value = "Shizuku permission not granted. Please grant permission."
-                Log.e(TAG, "Shizuku permission not granted")
+            val mode = shellRunner.detectMode()
+            if (mode == ShellRunner.Mode.NONE) {
+                _error.value = "Need Shizuku, root, or ADB-granted DUMP/BATTERY_STATS. See Settings > Advanced Stats."
+                Log.e(TAG, "No privileged access available")
                 return false
             }
 
             var hasData = false
 
             // Fetch battery stats
-            Log.d(TAG, "Fetching batterystats...")
-            when (val statsResult = shizuku.run("dumpsys batterystats --checkin")) {
-                is ShizukuBridge.RunResult.Success -> {
-                    val statsRaw = statsResult.output
-                    if (statsRaw.isNotBlank() && !statsRaw.startsWith("ERROR")) {
-                        Log.d(TAG, "Parsing batterystats (${statsRaw.length} chars)...")
-                        val parsed = BatteryStatsParser.parseCheckin(statsRaw)
-                        _snapshot.value = parsed
-                        hasData = true
-                        Log.d(TAG, "Parsed ${parsed.apps.size} apps, ${parsed.wakelocks.size} wakelocks")
-                    } else {
-                        Log.w(TAG, "Empty or error batterystats output: ${statsRaw.take(100)}")
-                    }
+            Log.d(TAG, "Fetching batterystats via $mode...")
+            val statsResult = shellRunner.run("dumpsys batterystats --checkin")
+            if (statsResult != null) {
+                val statsRaw = statsResult.output
+                if (statsRaw.isNotBlank() && !statsRaw.startsWith("ERROR") && !statsRaw.contains("Permission Denial")) {
+                    Log.d(TAG, "Parsing batterystats (${statsRaw.length} chars, via ${statsResult.mode})...")
+                    val parsed = BatteryStatsParser.parseCheckin(statsRaw)
+                    _snapshot.value = parsed
+                    hasData = true
+                    Log.d(TAG, "Parsed ${parsed.apps.size} apps, ${parsed.wakelocks.size} wakelocks")
+                } else {
+                    Log.w(TAG, "Empty or error batterystats output: ${statsRaw.take(200)}")
+                    _error.value = "Failed to get battery stats: empty/error output"
                 }
-                is ShizukuBridge.RunResult.Error -> {
-                    Log.e(TAG, "batterystats command failed: ${statsResult.message}")
-                    _error.value = "Failed to get battery stats: ${statsResult.message}"
-                }
+            } else {
+                Log.e(TAG, "batterystats command failed via all runners")
+                _error.value = "Failed to get battery stats. Grant DUMP via ADB or start Shizuku."
             }
 
             // Device idle info
             Log.d(TAG, "Fetching deviceidle...")
-            when (val idleResult = shizuku.run("dumpsys deviceidle")) {
-                is ShizukuBridge.RunResult.Success -> {
-                    val idleRaw = idleResult.output
-                    if (idleRaw.isNotBlank()) {
-                        _deviceIdle.value = BatteryStatsParser.parseDeviceIdle(idleRaw)
-                        hasData = true
-                    }
-                }
-                is ShizukuBridge.RunResult.Error -> {
-                    Log.w(TAG, "deviceidle command failed: ${idleResult.message}")
-                }
+            val idleResult = shellRunner.run("dumpsys deviceidle")
+            if (idleResult != null && idleResult.output.isNotBlank()) {
+                _deviceIdle.value = BatteryStatsParser.parseDeviceIdle(idleResult.output)
+                hasData = true
+            } else {
+                Log.w(TAG, "deviceidle command failed or empty")
             }
 
             // Power manager info
             Log.d(TAG, "Fetching power manager...")
-            when (val powerResult = shizuku.run("dumpsys power")) {
-                is ShizukuBridge.RunResult.Success -> {
-                    val powerRaw = powerResult.output
-                    if (powerRaw.isNotBlank()) {
-                        _powerManager.value = BatteryStatsParser.parsePowerManager(powerRaw)
-                        hasData = true
-                    }
-                }
-                is ShizukuBridge.RunResult.Error -> {
-                    Log.w(TAG, "power command failed: ${powerResult.message}")
-                }
+            val powerResult = shellRunner.run("dumpsys power")
+            if (powerResult != null && powerResult.output.isNotBlank()) {
+                _powerManager.value = BatteryStatsParser.parsePowerManager(powerResult.output)
+                hasData = true
+            } else {
+                Log.w(TAG, "power command failed or empty")
             }
 
             if (hasData) {
@@ -139,13 +127,8 @@ class DetailedStatsCollector(
     }
 
     suspend fun resetStats(): Boolean {
-        if (!shizuku.ping() || !shizuku.hasPermission()) return false
-        return when (val result = shizuku.run("dumpsys batterystats --reset")) {
-            is ShizukuBridge.RunResult.Success -> {
-                result.output.contains("Battery stats reset") || result.output.isBlank()
-            }
-            is ShizukuBridge.RunResult.Error -> false
-        }
+        val result = shellRunner.run("dumpsys batterystats --reset") ?: return false
+        return result.output.contains("Battery stats reset") || result.output.isBlank()
     }
 
     fun startAutoRefresh(intervalMs: Long = 60_000L): Job {

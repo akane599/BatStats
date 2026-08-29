@@ -1,8 +1,14 @@
 package app.batstats.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,10 +18,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material3.*
@@ -23,11 +33,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.batstats.R
 import app.batstats.battery.BatteryGraph
+import app.batstats.battery.shizuku.ShizukuBridge
+import app.batstats.battery.util.PrivilegeChecker
+import app.batstats.battery.util.RootStatsCollector
+import app.batstats.battery.util.ShellRunner
 import app.batstats.settings.AppSettings
 import app.batstats.settings.AppSettingsSchema
 import app.batstats.settings.Data
@@ -35,6 +50,8 @@ import app.batstats.settings.Display
 import app.batstats.settings.General
 import app.batstats.settings.Notifications
 import app.batstats.viewmodel.SettingsViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import io.github.mlmgames.settings.core.SettingField
 import io.github.mlmgames.settings.core.SettingMeta
 import io.github.mlmgames.settings.core.backup.ImportResult
@@ -191,6 +208,10 @@ fun BatterySettingsScreen(
                             }
                         }
                     }
+                }
+
+                item(key = "advanced_stats") {
+                    AdvancedStatsSettingsCard(snackbarHost)
                 }
             }
         }
@@ -361,6 +382,134 @@ fun BatterySettingsScreen(
             dismissButton = { TextButton(onClick = { showClearDataDialog = false }) { Text(stringResource(R.string.cancel)) } }
         )
     }
+}
+
+@Composable
+private fun AdvancedStatsSettingsCard(snackbarHost: SnackbarHostState) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val shizukuBridge: ShizukuBridge = org.koin.compose.koinInject()
+    val shellRunner: ShellRunner = org.koin.compose.koinInject()
+
+    var hasShizuku by remember { mutableStateOf(false) }
+    var hasAdbDump by remember { mutableStateOf(false) }
+    var hasBatteryStats by remember { mutableStateOf(false) }
+    var hasUsage by remember { mutableStateOf(false) }
+    var hasRoot by remember { mutableStateOf(false) }
+    var advMode by remember { mutableStateOf(ShellRunner.Mode.NONE) }
+
+    fun refreshChecks() {
+        scope.launch {
+            hasShizuku = try { shizukuBridge.hasPermission() } catch (_: Exception) { false }
+            hasAdbDump = PrivilegeChecker.hasDump(context)
+            hasBatteryStats = PrivilegeChecker.hasBatteryStats(context)
+            hasUsage = PrivilegeChecker.hasUsageStats(context)
+            hasRoot = withContext(Dispatchers.IO) { RootStatsCollector.isRootAvailable() }
+            advMode = shellRunner.detectMode()
+        }
+    }
+
+    LaunchedEffect(Unit) { refreshChecks() }
+
+    val pkg = context.packageName
+    val cmds = remember(pkg) {
+        listOf(
+            "adb shell pm grant $pkg android.permission.BATTERY_STATS",
+            "adb shell pm grant $pkg android.permission.DUMP",
+            "adb shell pm grant $pkg android.permission.PACKAGE_USAGE_STATS",
+            "adb shell pm grant $pkg android.permission.INTERACT_ACROSS_USERS"
+        )
+    }
+    val oneLiner = remember(pkg) { "for p in DUMP BATTERY_STATS PACKAGE_USAGE_STATS INTERACT_ACROSS_USERS; do adb shell pm grant $pkg android.permission.\$p; done" }
+
+    Column(modifier = Modifier.padding(horizontal = 0.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Advanced Stats",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+        Card(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Privilege status", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    PrivStatusChip("Shizuku", hasShizuku)
+                    PrivStatusChip("DUMP", hasAdbDump)
+                    PrivStatusChip("BATTERY_STATS", hasBatteryStats)
+                    PrivStatusChip("Usage", hasUsage)
+                    PrivStatusChip("Root", hasRoot)
+                }
+                Text("Active mode: ${advMode.name}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (advMode != ShellRunner.Mode.NONE) "✓ Advanced stats available via $advMode"
+                    else "✗ No privileged access — grant via ADB/Shizuku/Root for per-app mAh, wakelocks, etc.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (advMode != ShellRunner.Mode.NONE) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { refreshChecks() }) { Text("Recheck") }
+                    TextButton(onClick = {
+                        context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }) { Text("Usage access") }
+                    if (!hasShizuku) {
+                        TextButton(onClick = { try { shizukuBridge.requestPermission(1001) } catch (_: Exception) {} }) { Text("Request Shizuku") }
+                    }
+                }
+                HorizontalDivider()
+                Text("ADB grant (permanent, survives reboot)", style = MaterialTheme.typography.labelMedium)
+                cmds.forEach { cmd ->
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text(cmd, modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall)
+                        IconButton(onClick = {
+                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText("adb", cmd))
+                            scope.launch { snackbarHost.showSnackbar("Copied") }
+                        }) { Icon(Icons.Outlined.ContentCopy, "Copy", modifier = androidx.compose.ui.Modifier.width(18.dp)) }
+                    }
+                }
+                Text("One-liner:", style = MaterialTheme.typography.labelSmall)
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(oneLiner, modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall)
+                    IconButton(onClick = {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("adb", oneLiner))
+                        scope.launch { snackbarHost.showSnackbar("Copied") }
+                    }) { Icon(Icons.Outlined.ContentCopy, "Copy") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("adb", cmds.joinToString("\n")))
+                        scope.launch { snackbarHost.showSnackbar("All commands copied") }
+                    }) { Text("Copy all") }
+                    TextButton(onClick = {
+                        if (hasRoot) {
+                            scope.launch {
+                                var ok = 0
+                                listOf("android.permission.BATTERY_STATS","android.permission.DUMP","android.permission.PACKAGE_USAGE_STATS").forEach { perm ->
+                                    val out = RootStatsCollector.runAsRoot("pm grant $pkg $perm")
+                                    if (out != null && !out.contains("Exception") && !out.contains("Error")) ok++
+                                }
+                                refreshChecks()
+                                snackbarHost.showSnackbar(if (ok>0) "Granted via root ($ok/3), recheck" else "Root grant failed — check su")
+                            }
+                        }
+                    }, enabled = hasRoot) { Text("Grant via Root") }
+                }
+                Text("Enable Developer options → USB debugging. On Xiaomi/HyperOS/OnePlus also enable “USB debugging (Security settings)” / “Disable permission monitoring”, then reboot. After grant: force-stop app or reboot.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PrivStatusChip(label: String, granted: Boolean) {
+    AssistChip(
+        onClick = {},
+        label = { Text(label) },
+        leadingIcon = { Icon(if (granted) Icons.Outlined.CheckCircle else Icons.Outlined.ErrorOutline, null, modifier = androidx.compose.ui.Modifier.width(16.dp), tint = if (granted) androidx.compose.ui.graphics.Color(0xFF2E7D32) else MaterialTheme.colorScheme.error) },
+        colors = AssistChipDefaults.assistChipColors(containerColor = if (granted) androidx.compose.ui.graphics.Color(0xFFE8F5E9) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
+    )
 }
 
 @Composable

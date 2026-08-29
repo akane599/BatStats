@@ -2,6 +2,7 @@ package app.batstats.battery.shizuku
 
 import android.util.Log
 import app.batstats.battery.data.db.AppEnergyDao
+import app.batstats.battery.util.ShellRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,7 +15,9 @@ import kotlin.math.max
 
 class BstatsCollector(
     private val dao: AppEnergyDao,
-    private val shizuku: ShizukuBridge
+    private val shellRunner: ShellRunner,
+    // backward compat
+    private val shizuku: ShizukuBridge? = null
 ) {
     companion object {
         private const val TAG = "BstatsCollector"
@@ -32,37 +35,32 @@ class BstatsCollector(
         job = scope.launch {
             while (isActive) {
                 try {
-                    if (!shizuku.ping() || !shizuku.hasPermission()) {
-                        delay(2_000)
+                    val result = shellRunner.run("dumpsys batterystats --checkin")
+                    if (result == null) {
+                        Log.w(TAG, "No privileged access for batterystats --checkin")
+                        delay(5_000)
                         continue
                     }
 
-                    when (val result = shizuku.run("dumpsys batterystats --checkin")) {
-                        is ShizukuBridge.RunResult.Success -> {
-                            val snap = CheckinParser.parse(result.output.lineSequence())
-                            val now = System.currentTimeMillis()
+                    val snap = CheckinParser.parse(result.output.lineSequence())
+                    val now = System.currentTimeMillis()
 
-                            if (last.isNotEmpty()) {
-                                for ((pkg, cur) in snap.perPackageMah) {
-                                    val prev = last[pkg] ?: 0.0
-                                    val delta = max(0.0, cur - prev)
-                                    if (delta > 0.0001) {
-                                        dao.incrementHour(
-                                            packageName = pkg,
-                                            atMillis = now,
-                                            deltaMah = delta,
-                                            addSamples = 1,
-                                            mode = "SHIZUKU"
-                                        )
-                                    }
-                                }
+                    if (last.isNotEmpty()) {
+                        for ((pkg, cur) in snap.perPackageMah) {
+                            val prev = last[pkg] ?: 0.0
+                            val delta = max(0.0, cur - prev)
+                            if (delta > 0.0001) {
+                                dao.incrementHour(
+                                    packageName = pkg,
+                                    atMillis = now,
+                                    deltaMah = delta,
+                                    addSamples = 1,
+                                    mode = result.mode.name
+                                )
                             }
-                            last = snap.perPackageMah
-                        }
-                        is ShizukuBridge.RunResult.Error -> {
-                            Log.w(TAG, "Command failed: ${result.message}")
                         }
                     }
+                    last = snap.perPackageMah
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in polling loop", e)
                 }

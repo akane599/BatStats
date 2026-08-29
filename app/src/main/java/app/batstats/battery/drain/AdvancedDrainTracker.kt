@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.util.Log
 import app.batstats.battery.shizuku.ShizukuBridge
 import app.batstats.battery.util.BatteryStatsParser
+import app.batstats.battery.util.ShellRunner
 import app.batstats.settings.AppSettings
 import app.batstats.settings.detailedStatsIntervalMs
 import io.github.mlmgames.settings.core.SettingsRepository
@@ -26,6 +27,7 @@ import kotlin.math.max
 class AdvancedDrainTracker(
     private val context: Context,
     private val shizukuBridge: ShizukuBridge,
+    private val shellRunner: ShellRunner,
     private val settingsRepository: SettingsRepository<AppSettings>,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 ) {
@@ -346,26 +348,22 @@ class AdvancedDrainTracker(
             return Pair(cachedAwakeTime, cachedDeepSleepTime)
         }
 
-        if (shizukuBridge.ping() && shizukuBridge.hasPermission()) {
-            try {
-                when (val result = shizukuBridge.run("dumpsys batterystats --checkin")) {
-                    is ShizukuBridge.RunResult.Success -> {
-                        val snapshot = BatteryStatsParser.parseCheckin(result.output)
-                        val awakeTime = snapshot.batteryRealtimeMs - (snapshot.doze?.deepIdleTimeMs ?: 0L)
-                        val sleepTime = snapshot.doze?.deepIdleTimeMs ?: 0L
-                        cachedAwakeTime = awakeTime
-                        cachedDeepSleepTime = sleepTime
-                        if (snapshot.estimatedCapacityMah > 0) {
-                            estimatedCapacityMah = snapshot.estimatedCapacityMah.toDouble()
-                        }
-                        lastDumpsysTime = System.currentTimeMillis()
-                        return Pair(awakeTime, sleepTime)
-                    }
-                    is ShizukuBridge.RunResult.Error -> {}
+        try {
+            val result = shellRunner.run("dumpsys batterystats --checkin")
+            if (result != null) {
+                val snapshot = BatteryStatsParser.parseCheckin(result.output)
+                val awakeTime = snapshot.batteryRealtimeMs - (snapshot.doze?.deepIdleTimeMs ?: 0L)
+                val sleepTime = snapshot.doze?.deepIdleTimeMs ?: 0L
+                cachedAwakeTime = awakeTime
+                cachedDeepSleepTime = sleepTime
+                if (snapshot.estimatedCapacityMah > 0) {
+                    estimatedCapacityMah = snapshot.estimatedCapacityMah.toDouble()
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error getting deep sleep info", e)
+                lastDumpsysTime = System.currentTimeMillis()
+                return Pair(awakeTime, sleepTime)
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting deep sleep info", e)
         }
         
         val uptime = SystemClock.uptimeMillis()

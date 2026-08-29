@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,6 +26,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.platform.LocalContext
 import app.batstats.battery.util.BatteryStatsParser
 import app.batstats.battery.util.RootStatsCollector
 import app.batstats.viewmodel.DetailedStatsViewModel
@@ -49,6 +58,9 @@ fun DetailedStatsScreen(
     val error by vm.error.collectAsStateWithLifecycle()
     val hasShizuku by vm.hasShizuku.collectAsStateWithLifecycle()
     val hasRoot by vm.hasRoot.collectAsStateWithLifecycle()
+    val hasAdb by vm.hasAdb.collectAsStateWithLifecycle()
+    val hasAdvanced by vm.hasAdvanced.collectAsStateWithLifecycle()
+    val advMode by vm.advMode.collectAsStateWithLifecycle()
     val kernelBattery by vm.kernelBattery.collectAsStateWithLifecycle()
 
     val scope = rememberCoroutineScope()
@@ -138,9 +150,13 @@ fun DetailedStatsScreen(
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            if (!hasShizuku) {
-                ShizukuRequiredCard(
-                    onRequestPermission = { vm.requestShizukuPermission() }
+            if (!hasAdvanced) {
+                PrivilegeRequiredCard(
+                    hasShizuku = hasShizuku,
+                    hasAdb = hasAdb,
+                    hasRoot = hasRoot,
+                    onRequestShizuku = { vm.requestShizukuPermission() },
+                    onRecheck = { vm.recheck() }
                 )
             } else {
                 // Tab row
@@ -212,38 +228,129 @@ fun DetailedStatsScreen(
 private data class StatsTab(val title: String, val icon: ImageVector)
 
 @Composable
-private fun ShizukuRequiredCard(onRequestPermission: () -> Unit) {
-    Box(
+private fun PrivilegeRequiredCard(
+    hasShizuku: Boolean,
+    hasAdb: Boolean,
+    hasRoot: Boolean,
+    onRequestShizuku: () -> Unit,
+    onRecheck: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHost = remember { SnackbarHostState() }
+    LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        ElevatedCard(
-            modifier = Modifier.padding(32.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Icon(
-                    Icons.Outlined.Security,
-                    null,
-                    modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    "Shizuku Required",
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Text(
-                    "Detailed battery stats require Shizuku to be running and permission granted. " +
-                            "Shizuku provides ADB-level access without root.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(onClick = onRequestPermission) {
-                    Text("Grant Permission")
+        item {
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Security, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Advanced Stats Required", style = MaterialTheme.typography.titleMedium)
+                    }
+                    Text(
+                        "Detailed stats need one of: Shizuku, Root, or ADB-granted permissions (permanent, no service).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                        StatusChip("Shizuku", hasShizuku)
+                        StatusChip("ADB DUMP", hasAdb)
+                        StatusChip("Root", hasRoot)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onRequestShizuku) { Text("Request Shizuku") }
+                        OutlinedButton(onClick = onRecheck) { Text("Recheck") }
+                    }
                 }
+            }
+        }
+        item {
+            AdbGrantCard(context)
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Troubleshooting", style = MaterialTheme.typography.labelLarge)
+                    Text("• Enable Developer options → USB debugging.", style = MaterialTheme.typography.bodySmall)
+                    Text("• On Xiaomi/MIUI/HyperOS/OnePlus: also enable “USB debugging (Security settings)” / “Disable permission monitoring”, then reboot.", style = MaterialTheme.typography.bodySmall)
+                    Text("• Run: adb devices → accept prompt → run grant commands → force-stop BatStats or reboot.", style = MaterialTheme.typography.bodySmall)
+                    Text("• Grant fails with “Neither user 2000 … GRANT_RUNTIME_PERMISSIONS”? Enable security settings above.", style = MaterialTheme.typography.bodySmall)
+                    Text("• Grants persist until uninstall. Use pm grant via root (su -c pm grant ...) as alternative.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusChip(label: String, granted: Boolean) {
+    AssistChip(
+        onClick = {},
+        label = { Text("$label: ${if (granted) "✓" else "✗"}") },
+        leadingIcon = {
+            Icon(
+                if (granted) Icons.Filled.CheckCircle else Icons.Filled.Cancel,
+                null,
+                tint = if (granted) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(16.dp)
+            )
+        },
+        colors = AssistChipDefaults.assistChipColors(
+            containerColor = if (granted) Color(0xFFE8F5E9) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+        )
+    )
+}
+
+@Composable
+private fun AdbGrantCard(context: Context) {
+    val scope = rememberCoroutineScope()
+    val pkg = context.packageName
+    val oneLiner = "for p in DUMP BATTERY_STATS PACKAGE_USAGE_STATS INTERACT_ACROSS_USERS; do adb shell pm grant $pkg android.permission.\$p; done"
+    val commands = listOf(
+        "adb shell pm grant $pkg android.permission.BATTERY_STATS",
+        "adb shell pm grant $pkg android.permission.DUMP",
+        "adb shell pm grant $pkg android.permission.PACKAGE_USAGE_STATS",
+        "adb shell pm grant $pkg android.permission.INTERACT_ACROSS_USERS",
+        "adb shell settings put global hidden_api_policy 1  # optional"
+    )
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("ADB (permanent) — Recommended", style = MaterialTheme.typography.titleSmall)
+            Text("Run once via ADB, survives reboots/updates (until uninstall). No need to keep Shizuku running.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            commands.forEach { cmd ->
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(cmd, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()))
+                    IconButton(onClick = {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("adb", cmd))
+                    }) { Icon(Icons.Outlined.ContentCopy, "Copy", modifier = Modifier.size(18.dp)) }
+                }
+                HorizontalDivider()
+            }
+            Text("One-liner (BBS-style):", style = MaterialTheme.typography.labelSmall)
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(oneLiner, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()))
+                IconButton(onClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("adb", oneLiner))
+                }) { Icon(Icons.Outlined.ContentCopy, "Copy", modifier = Modifier.size(18.dp)) }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("adb", commands.joinToString("\n")))
+                }) { Text("Copy all") }
+                TextButton(onClick = {
+                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }) { Text("App info") }
             }
         }
     }
@@ -573,7 +680,7 @@ private fun AppsTab(apps: List<BatteryStatsParser.AppPowerStats>) {
                     onClick = { expanded = true },
                     label = { Text("Sort: ${sortBy.label}") },
                     trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                    modifier = Modifier.menuAnchor()
+                    modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                 )
 
                 ExposedDropdownMenu(

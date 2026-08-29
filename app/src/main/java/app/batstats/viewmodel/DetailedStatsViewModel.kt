@@ -1,11 +1,14 @@
 package app.batstats.viewmodel
 
+import android.content.Context
 import android.content.pm.PackageManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.batstats.battery.shizuku.ShizukuBridge
 import app.batstats.battery.util.DetailedStatsCollector
+import app.batstats.battery.util.PrivilegeChecker
 import app.batstats.battery.util.RootStatsCollector
+import app.batstats.battery.util.ShellRunner
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,7 +17,9 @@ import rikka.shizuku.Shizuku
 
 class DetailedStatsViewModel(
     private val collector: DetailedStatsCollector,
-    private val shizukuBridge: ShizukuBridge
+    private val shizukuBridge: ShizukuBridge,
+    private val shellRunner: ShellRunner,
+    private val context: Context
 ) : ViewModel() {
 
     // Forward flows from collector
@@ -30,6 +35,15 @@ class DetailedStatsViewModel(
 
     private val _hasRoot = MutableStateFlow(false)
     val hasRoot: StateFlow<Boolean> = _hasRoot.asStateFlow()
+
+    private val _hasAdb = MutableStateFlow(false)
+    val hasAdb: StateFlow<Boolean> = _hasAdb.asStateFlow()
+
+    private val _hasAdvanced = MutableStateFlow(false)
+    val hasAdvanced: StateFlow<Boolean> = _hasAdvanced.asStateFlow()
+
+    private val _advMode = MutableStateFlow<ShellRunner.Mode>(ShellRunner.Mode.NONE)
+    val advMode: StateFlow<ShellRunner.Mode> = _advMode.asStateFlow()
 
     private val _kernelBattery = MutableStateFlow<RootStatsCollector.KernelBatteryInfo?>(null)
     val kernelBattery: StateFlow<RootStatsCollector.KernelBatteryInfo?> = _kernelBattery.asStateFlow()
@@ -64,12 +78,19 @@ class DetailedStatsViewModel(
 
     private fun checkPermissions() {
         viewModelScope.launch {
-            _hasShizuku.value = shizukuBridge.hasPermission()
+            _hasShizuku.value = try { shizukuBridge.hasPermission() } catch (_: Exception) { false }
             _hasRoot.value = RootStatsCollector.isRootAvailable()
+            _hasAdb.value = PrivilegeChecker.hasAdvancedViaAdb(context)
+            _hasAdvanced.value = _hasShizuku.value || _hasRoot.value || _hasAdb.value
+            _advMode.value = shellRunner.detectMode()
 
-            if (_hasShizuku.value) refresh()
+            if (_hasAdvanced.value) refresh()
             if (_hasRoot.value) refreshRootStats()
         }
+    }
+
+    fun recheck() {
+        checkPermissions()
     }
 
     fun requestShizukuPermission() {
@@ -78,7 +99,14 @@ class DetailedStatsViewModel(
 
     fun refresh() {
         viewModelScope.launch {
-            if (_hasShizuku.value) {
+            // Recheck ADB grants (they can be granted while app is alive)
+            _hasAdb.value = PrivilegeChecker.hasAdvancedViaAdb(context)
+            _hasShizuku.value = try { shizukuBridge.hasPermission() } catch (_: Exception) { false }
+            _hasRoot.value = RootStatsCollector.isRootAvailable()
+            _hasAdvanced.value = _hasShizuku.value || _hasRoot.value || _hasAdb.value
+            _advMode.value = shellRunner.detectMode()
+
+            if (_hasAdvanced.value) {
                 collector.refresh()
             }
             if (_hasRoot.value) {
@@ -98,7 +126,7 @@ class DetailedStatsViewModel(
     suspend fun resetStats(): Boolean {
         return try {
             when {
-                _hasShizuku.value -> collector.resetStats()
+                _hasAdvanced.value -> collector.resetStats()
                 _hasRoot.value -> RootStatsCollector.resetBatteryStats()
                 else -> false
             }

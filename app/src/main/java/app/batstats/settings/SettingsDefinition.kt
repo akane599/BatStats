@@ -39,7 +39,7 @@ data class AppSettings(
 
     @Setting(
         title = "Show Drain Stats Notification",
-        description = "Show detailed drain statistics in notification (requires Shizuku)",
+        description = "Show detailed drain statistics in notification (requires Shizuku, Root or ADB)",
         category = General::class,
         type = Toggle::class,
         key = "show_drain_notification"
@@ -66,7 +66,7 @@ data class AppSettings(
 
     @Setting(
         title = "Detailed Stats Interval",
-        description = "How often to collect detailed battery stats via Shizuku.",
+        description = "How often to collect detailed battery stats via Shizuku/Root/ADB.",
         category = General::class,
         type = Dropdown::class, // Timepicker might be better later (but does not store in secs)
         options = ["1 minute", "5 minutes", "15 minutes", "30 minutes"],

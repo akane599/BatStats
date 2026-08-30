@@ -190,7 +190,7 @@ data class AppSettings(
         type = Toggle::class,
         key = "dynamic_colors"
     )
-    val dynamicColors: Boolean = true,
+    val dynamicColors: Boolean = false,
 
     @Setting(
         title = "Chart Time Range",

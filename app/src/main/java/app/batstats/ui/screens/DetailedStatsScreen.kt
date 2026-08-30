@@ -279,11 +279,11 @@ private fun PrivilegeRequiredCard(
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Troubleshooting", style = MaterialTheme.typography.labelLarge)
-                    Text("• Enable Developer options → USB debugging.", style = MaterialTheme.typography.bodySmall)
-                    Text("• On Xiaomi/MIUI/HyperOS/OnePlus: also enable “USB debugging (Security settings)” / “Disable permission monitoring”, then reboot.", style = MaterialTheme.typography.bodySmall)
-                    Text("• Run: adb devices → accept prompt → run grant commands → force-stop BatStats or reboot.", style = MaterialTheme.typography.bodySmall)
-                    Text("• Grant fails with “Neither user 2000 … GRANT_RUNTIME_PERMISSIONS”? Enable security settings above.", style = MaterialTheme.typography.bodySmall)
-                    Text("• Grants persist until uninstall. Use pm grant via root (su -c pm grant ...) as alternative.", style = MaterialTheme.typography.bodySmall)
+                    Text("- Enable Developer options, enable USB debugging.", style = MaterialTheme.typography.bodySmall)
+                    Text("- On Xiaomi/MIUI/HyperOS/OnePlus: also enable USB debugging (Security settings) / Disable permission monitoring, then reboot.", style = MaterialTheme.typography.bodySmall)
+                    Text("- Run: adb devices, accept prompt, run grant commands, then force-stop BatStats or reboot.", style = MaterialTheme.typography.bodySmall)
+                    Text("- Grant fails with Neither user 2000 nor current process has GRANT_RUNTIME_PERMISSIONS? Enable security settings above.", style = MaterialTheme.typography.bodySmall)
+                    Text("- Grants persist until uninstall. Use pm grant via root (su -c pm grant ...) as alternative.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -294,7 +294,7 @@ private fun PrivilegeRequiredCard(
 private fun StatusChip(label: String, granted: Boolean) {
     AssistChip(
         onClick = {},
-        label = { Text("$label: ${if (granted) "✓" else "✗"}") },
+        label = { Text("$label: ${if (granted) "yes" else "no"}") },
         leadingIcon = {
             Icon(
                 if (granted) Icons.Filled.CheckCircle else Icons.Filled.Cancel,
@@ -311,9 +311,7 @@ private fun StatusChip(label: String, granted: Boolean) {
 
 @Composable
 private fun AdbGrantCard(context: Context) {
-    val scope = rememberCoroutineScope()
     val pkg = context.packageName
-    val oneLiner = "for p in DUMP BATTERY_STATS PACKAGE_USAGE_STATS INTERACT_ACROSS_USERS; do adb shell pm grant $pkg android.permission.\$p; done"
     val commands = listOf(
         "adb shell pm grant $pkg android.permission.BATTERY_STATS",
         "adb shell pm grant $pkg android.permission.DUMP",
@@ -323,8 +321,8 @@ private fun AdbGrantCard(context: Context) {
     )
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("ADB (permanent) — Recommended", style = MaterialTheme.typography.titleSmall)
-            Text("Run once via ADB, survives reboots/updates (until uninstall). No need to keep Shizuku running.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("ADB", style = MaterialTheme.typography.titleSmall)
+            Text("Run once via ADB, survives reboots and updates until uninstall. No need to keep Shizuku running.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             commands.forEach { cmd ->
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(cmd, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()))
@@ -334,14 +332,6 @@ private fun AdbGrantCard(context: Context) {
                     }) { Icon(Icons.Outlined.ContentCopy, "Copy", modifier = Modifier.size(18.dp)) }
                 }
                 HorizontalDivider()
-            }
-            Text("One-liner (BBS-style):", style = MaterialTheme.typography.labelSmall)
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(oneLiner, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()))
-                IconButton(onClick = {
-                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("adb", oneLiner))
-                }) { Icon(Icons.Outlined.ContentCopy, "Copy", modifier = Modifier.size(18.dp)) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {

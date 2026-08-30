@@ -51,7 +51,7 @@ class ShizukuBridge(private val context: Context) {
         val result = try {
             Shizuku.pingBinder()
         } catch (e: Exception) {
-            Log.e(TAG, "ping failed", e)
+            Log.d(TAG, "ping failed: ${e.message}")
             false
         }
         Log.d(TAG, "ping: $result")
@@ -59,10 +59,14 @@ class ShizukuBridge(private val context: Context) {
     }
 
     fun hasPermission(): Boolean {
+        if (!ping()) {
+            Log.d(TAG, "hasPermission: false (Shizuku not running)")
+            return false
+        }
         val result = try {
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         } catch (e: Exception) {
-            Log.e(TAG, "hasPermission check failed", e)
+            Log.d(TAG, "hasPermission check failed: ${e.message}")
             false
         }
         Log.d(TAG, "hasPermission: $result")
@@ -70,10 +74,14 @@ class ShizukuBridge(private val context: Context) {
     }
 
     fun requestPermission(requestCode: Int = 1001) {
+        if (!ping()) {
+            Log.w(TAG, "requestPermission: Shizuku not running, ignoring")
+            return
+        }
         try {
             Shizuku.requestPermission(requestCode)
         } catch (e: Exception) {
-            Log.e(TAG, "requestPermission failed", e)
+            Log.w(TAG, "requestPermission failed: ${e.message}")
         }
     }
 

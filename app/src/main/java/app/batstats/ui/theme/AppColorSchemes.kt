@@ -8,18 +8,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 object ThemeColors {
-    val AuroraTeal = Color(0xFF00D9B5)   
-    val AuroraPurple = Color(0xFF8B5CF6) 
-    val AuroraGreen = Color(0xFF34D399)  
-    val AuroraPink = Color(0xFFEC4899)   
-    val AuroraBlue = Color(0xFF3B82F6)   
+    val AuroraTeal = Color(0xFF00D9B5)
+    val AuroraPurple = Color(0xFF8B5CF6)
+    val AuroraGreen = Color(0xFF34D399)
+    val AuroraPink = Color(0xFFEC4899)
+    val AuroraBlue = Color(0xFF3B82F6)
 
-    val DarkSurface = Color(0xFF0A0E1A)  
+    val DarkSurface = Color(0xFF0A0E1A)
     val DarkBackground = Color(0xFF050810)
     val DarkSurfaceVariant = Color(0xFF1A1F36)
     val DarkContainer = Color(0xFF151B2E)
 
-    val LightSurface = Color(0xFFF7F9FC) 
+    val LightSurface = Color(0xFFF7F9FC)
     val LightBackground = Color(0xFFFFFFFF)
     val LightSurfaceVariant = Color(0xFFE8ECF4)
     val LightContainer = Color(0xFFDDE3EE)
@@ -62,7 +62,30 @@ val AurDarkTheme = darkColorScheme(
     inverseOnSurface = Color(0xFF2E3138),
     inversePrimary = Color(0xFF006B5A),
 
-    surfaceTint = ThemeColors.AuroraTeal
+    surfaceTint = ThemeColors.AuroraTeal,
+
+    surfaceBright = Color(0xFF2A3040),
+    surfaceDim = Color(0xFF050810),
+    surfaceContainer = Color(0xFF151B2E),
+    surfaceContainerLow = Color(0xFF0F1422),
+    surfaceContainerLowest = Color(0xFF050810),
+    surfaceContainerHigh = Color(0xFF1E2435),
+    surfaceContainerHighest = Color(0xFF2A3040),
+
+    primaryFixed = ThemeColors.AuroraTeal,
+    onPrimaryFixed = Color(0xFF003830),
+    primaryFixedDim = Color(0xFF005047),
+    onPrimaryFixedVariant = Color(0xFF70F5D9),
+
+    secondaryFixed = ThemeColors.AuroraPurple,
+    onSecondaryFixed = Color(0xFF3B1F70),
+    secondaryFixedDim = Color(0xFF523895),
+    onSecondaryFixedVariant = Color(0xFFE4D4FF),
+
+    tertiaryFixed = ThemeColors.AuroraGreen,
+    onTertiaryFixed = Color(0xFF003A2B),
+    tertiaryFixedDim = Color(0xFF005141),
+    onTertiaryFixedVariant = Color(0xFF8CF5D3)
 )
 
 val AurLightTheme = lightColorScheme(
@@ -102,7 +125,30 @@ val AurLightTheme = lightColorScheme(
     inverseOnSurface = Color(0xFFF0F1F5),
     inversePrimary = Color(0xFF4FDDC4),
 
-    surfaceTint = Color(0xFF00695C)
+    surfaceTint = Color(0xFF00695C),
+
+    surfaceBright = Color(0xFFFFFFFF),
+    surfaceDim = Color(0xFFDDE3EE),
+    surfaceContainer = Color(0xFFE8ECF4),
+    surfaceContainerLow = Color(0xFFF0F3F8),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerHigh = Color(0xFFDDE3EE),
+    surfaceContainerHighest = Color(0xFFD1D9E6),
+
+    primaryFixed = ThemeColors.AuroraTeal,
+    onPrimaryFixed = Color(0xFF003830),
+    primaryFixedDim = Color(0xFF005047),
+    onPrimaryFixedVariant = Color(0xFF70F5D9),
+
+    secondaryFixed = ThemeColors.AuroraPurple,
+    onSecondaryFixed = Color(0xFF3B1F70),
+    secondaryFixedDim = Color(0xFF523895),
+    onSecondaryFixedVariant = Color(0xFFE4D4FF),
+
+    tertiaryFixed = ThemeColors.AuroraGreen,
+    onTertiaryFixed = Color(0xFF003A2B),
+    tertiaryFixedDim = Color(0xFF005141),
+    onTertiaryFixedVariant = Color(0xFF8CF5D3)
 )
 
 

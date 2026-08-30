@@ -193,6 +193,14 @@ data class AppSettings(
     val dynamicColors: Boolean = false,
 
     @Setting(
+        title = "Pure black (OLED)",
+        category = Display::class,
+        type = Toggle::class,
+        key = "oled_black"
+    )
+    val oledBlack: Boolean = false,
+
+    @Setting(
         title = "Chart Time Range",
         category = Display::class,
         type = Dropdown::class,

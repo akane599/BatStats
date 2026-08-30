@@ -44,7 +44,8 @@ class BatteryMainActivity : ComponentActivity() {
             MainTheme(
                 darkTheme = darkTheme,
                 dynamicColor = settings.dynamicColors,
-                useAuroraTheme = !settings.dynamicColors
+                useAuroraTheme = !settings.dynamicColors,
+                oledBlack = settings.oledBlack
             ) {
                 MainScreen()
             }

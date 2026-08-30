@@ -15,9 +15,9 @@ on:
       play_track:
         description: 'Google Play track'
         required: true
-        default: 'alpha'
+        default: 'none'
         type: choice
-        options: [internal, alpha, beta, production]
+        options: [none, internal, alpha, beta, production]
       bump_type:
         description: 'Version bump type'
         required: true
@@ -40,7 +40,7 @@ jobs:
       app-name: BatStats
       app-slug: batstats
       application-id: app.batstats
-      play-track: ${{ inputs.play_track || 'alpha' }}
+      play-track: ${{ inputs.play_track || 'none' }}
       bump-type: ${{ inputs.bump_type }}
     secrets:
       KEYSTORE: ${{ secrets.KEYSTORE }}

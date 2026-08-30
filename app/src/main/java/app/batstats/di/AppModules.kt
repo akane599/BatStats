@@ -35,7 +35,7 @@ import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
 
-private const val SCHEMA_VERSION = 1
+private const val SCHEMA_VERSION = 2
 private const val DATASTORE_NAME = "batstats_settings"
 
 val appModule = module {
@@ -54,7 +54,17 @@ val appModule = module {
 
     single<StringResourceProvider> { AndroidStringResourceProvider(androidContext()) }
     single { ResetManager(get(), AppSettingsSchema) }
-    single { MigrationManager(dataStore = get(), currentVersion = SCHEMA_VERSION) }
+    single {
+        MigrationManager(dataStore = get(), currentVersion = SCHEMA_VERSION).apply {
+            addMigration(object : io.github.mlmgames.settings.core.managers.Migration {
+                override val fromVersion = 1
+                override val toVersion = 2
+                override suspend fun migrate(prefs: androidx.datastore.preferences.core.MutablePreferences) {
+                    prefs[androidx.datastore.preferences.core.booleanPreferencesKey("dynamic_colors")] = false
+                }
+            })
+        }
+    }
 
     single {
         val app = androidApplication()

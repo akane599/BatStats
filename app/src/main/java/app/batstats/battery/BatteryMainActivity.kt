@@ -7,9 +7,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.batstats.settings.AppSettings
 import app.batstats.ui.screens.MainScreen
 import app.batstats.ui.theme.MainTheme
+import io.github.mlmgames.settings.core.SettingsRepository
+import org.koin.compose.koinInject
 
 class BatteryMainActivity : ComponentActivity() {
     private val notifPerm = registerForActivityResult(
@@ -27,7 +32,19 @@ class BatteryMainActivity : ComponentActivity() {
         }
 
         setContent {
-            MainTheme(darkTheme = true, useAuroraTheme = true) {
+            val settingsRepository: SettingsRepository<AppSettings> = koinInject()
+            val settings by settingsRepository.flow.collectAsStateWithLifecycle(initialValue = AppSettings())
+            val isSystemDark = isSystemInDarkTheme()
+            val darkTheme = when (settings.themeIndex) {
+                1 -> false
+                2 -> true
+                else -> isSystemDark
+            }
+            MainTheme(
+                darkTheme = darkTheme,
+                dynamicColor = settings.dynamicColors,
+                useAuroraTheme = !settings.dynamicColors
+            ) {
                 MainScreen()
             }
         }

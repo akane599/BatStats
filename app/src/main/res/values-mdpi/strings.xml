@@ -5,5 +5,5 @@
     <string name="high_temperature_alert">High temperature alert!</string>
     <string name="notify_temp_exceeds">Notify when temperature exceeds</string>
     <string name="high_battery_value">High Battery (%)</string>
-    <string name="notify_draining_above"><![CDATA[Notify when draining > %i mA]]></string>
+    <string name="notify_draining_above"><![CDATA[Notify when draining > %1$d mA]]></string>
 </resources>

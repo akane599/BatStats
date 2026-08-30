@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Backup
@@ -58,6 +59,7 @@ import org.koin.compose.koinInject
 fun BatterySettingsScreen(
     onBack: () -> Unit,
     onExportData: () -> Unit,
+    initialCategory: String? = null,
     vm: SettingsViewModel = koinViewModel(),
     stringProvider: StringResourceProvider = koinInject()
 ) {
@@ -96,6 +98,20 @@ fun BatterySettingsScreen(
         Data::class to "Data & Export"
     )
 
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(initialCategory) {
+        if (initialCategory != null) {
+            val idx = categoryOrder.indexOfFirst { it.second == initialCategory }
+            if (idx >= 0) {
+                val target = idx * 2
+                // delay to allow LazyColumn to be composed
+                kotlinx.coroutines.delay(100)
+                listState.animateScrollToItem(target)
+            }
+        }
+    }
+
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
@@ -133,6 +149,7 @@ fun BatterySettingsScreen(
     ) { padding ->
         ProvideStringResources(stringProvider) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.padding(padding),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {

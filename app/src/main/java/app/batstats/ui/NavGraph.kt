@@ -6,7 +6,6 @@ import androidx.navigation3.runtime.NavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
-import app.batstats.ui.screens.AlarmsScreen
 import app.batstats.ui.screens.BatterySettingsScreen
 import app.batstats.ui.screens.DashboardScreen
 import app.batstats.ui.screens.DataScreen
@@ -33,8 +32,8 @@ fun NavGraph(
             entry<Screen.Dashboard> {
                 DashboardScreen(
                     onOpenHistory = { backStack.add(Screen.History) },
-                    onOpenAlarms = { backStack.add(Screen.Alarms) },
-                    onOpenSettings = { backStack.add(Screen.Settings) },
+                    onOpenAlarms = { backStack.add(Screen.Settings(initialCategory = "Notifications")) },
+                    onOpenSettings = { backStack.add(Screen.Settings()) },
                     onOpenData = { backStack.add(Screen.Data) },
                     onOpenDetailedStats = { backStack.add(Screen.DetailedStats) },
                     onOpenDrainStats = { backStack.add(Screen.DrainStats) }
@@ -56,18 +55,15 @@ fun NavGraph(
                 )
             }
 
-            entry<Screen.Alarms> {
-                AlarmsScreen(onBack = { backStack.removeAt(backStack.lastIndex) })
-            }
-
             entry<Screen.Data> {
                 DataScreen(onBack = { backStack.removeAt(backStack.lastIndex) })
             }
 
-            entry<Screen.Settings> {
+            entry<Screen.Settings> { args ->
                 BatterySettingsScreen(
                     onBack = { backStack.removeAt(backStack.lastIndex) },
-                    onExportData = { backStack.add(Screen.Data) }
+                    onExportData = { backStack.add(Screen.Data) },
+                    initialCategory = args.initialCategory
                 )
             }
 
@@ -97,13 +93,10 @@ sealed interface Screen: NavKey {
     data class SessionDetails(val sessionId: String) : Screen
 
     @Serializable
-    data object Alarms : Screen
-
-    @Serializable
     data object Data : Screen
 
     @Serializable
-    data object Settings : Screen
+    data class Settings(val initialCategory: String? = null) : Screen
 
     @Serializable
     data object DetailedStats : Screen

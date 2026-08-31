@@ -13,7 +13,7 @@ lifecycle = "2.11.0"
 material = "1.14.0"
 materialIconsExtended = "1.7.8"
 navigation3Runtime = "1.1.5"
-navigationFragmentKtx = "2.9.8"
+navigationFragmentKtx = "2.10.0"
 roomRuntime = "2.8.4"
 runtime = "1.11.4"
 workRuntimeKtx = "2.11.2"
@@ -26,7 +26,7 @@ animation = "1.11.4"
 shizuku = "13.1.5"
 documentfile = "1.1.0"
 apkDist = "0.5.2"
-composeBom = "2026.08.00"
+composeBom = "2026.08.01"
 
 [libraries]
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom-alpha", version.ref = "composeBom" }

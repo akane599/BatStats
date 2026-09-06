@@ -218,6 +218,7 @@ object BatteryStatsParser {
         var doze: DozeStats? = null
         val cpuFreq = mutableListOf<CpuFrequencyStats>()
         val processStats = mutableListOf<ProcessStats>()
+        val uidTimes = mutableMapOf<Int, UidTimes>()
 
         var batteryRealtimeMs = 0L
         var screenOnTimeMs = 0L
@@ -275,6 +276,41 @@ object BatteryStatsParser {
                     // Sensor: 9,<uid>,l,sr,<handle>,<count>,<time>
                     parts.getOrNull(2) == "l" && parts.getOrNull(3) == "sr" -> {
                         parseSensor(parts, uidToPkg, sensors)
+                    }
+
+                    // CPU: 9,<uid>,l,cpu,<userMs>,<systemMs>,<legacyPower>
+                    parts.getOrNull(2) == "l" && parts.getOrNull(3) == "cpu" -> {
+                        val uid = parts[1].toIntOrNull()
+                        if (uid != null) {
+                            val user = parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                            val system = parts.getOrNull(5)?.toLongOrNull() ?: 0L
+                            uidTimes.getOrPut(uid) { UidTimes() }.cpuMs += user + system
+                        }
+                    }
+
+                    // Foreground activity timer: 9,<uid>,l,fg,<timeMs>,<count>
+                    parts.getOrNull(2) == "l" && parts.getOrNull(3) == "fg" -> {
+                        val uid = parts[1].toIntOrNull()
+                        if (uid != null) {
+                            uidTimes.getOrPut(uid) { UidTimes() }.fgTimerMs +=
+                                parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                        }
+                    }
+
+                    // Foreground service timer: 9,<uid>,l,fgs,<timeMs>,<count>
+                    parts.getOrNull(2) == "l" && parts.getOrNull(3) == "fgs" -> {
+                        val uid = parts[1].toIntOrNull()
+                        if (uid != null) {
+                            uidTimes.getOrPut(uid) { UidTimes() }.fgsTimerMs +=
+                                parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                        }
+                    }
+
+                    // Process state times:
+                    // 9,<uid>,l,st,<top>,<fgService>,<foreground>,<background>,
+                    //              <topSleeping>,<heavyWeight>,<cached>
+                    parts.getOrNull(2) == "l" && parts.getOrNull(3) == "st" -> {
+                        parseStateTimes(parts, uidTimes)
                     }
 
                     // Signal strength: 9,0,l,sgt,<time0>,<time1>,<time2>,<time3>,<time4>
@@ -370,7 +406,9 @@ object BatteryStatsParser {
             screenOffDischargePercent = screenOffDischarge,
             screenOnDischargePercent = screenOnDischarge,
             estimatedCapacityMah = estCapacity,
-            apps = joinPerUidDetail(appStats.values, mergedWakelocks, mergedNetwork, mergedSensors),
+            apps = joinPerUidDetail(
+                appStats.values, mergedWakelocks, mergedNetwork, mergedSensors, uidTimes
+            ),
             wakelocks = mergedWakelocks,
             kernelWakelocks = kernelWakelocks
                 .mergeBy({ it.name }) { a, b ->
@@ -428,7 +466,8 @@ object BatteryStatsParser {
         apps: Collection<AppPowerStats>,
         wakelocks: List<WakelockStats>,
         network: List<NetworkStats>,
-        sensors: List<SensorStats>
+        sensors: List<SensorStats>,
+        uidTimes: Map<Int, UidTimes>
     ): List<AppPowerStats> {
         if (apps.isEmpty()) return emptyList()
 
@@ -443,16 +482,56 @@ object BatteryStatsParser {
 
         return apps.map { app ->
             val net = networkByUid[app.uid]
+            val times = uidTimes[app.uid]
             app.copy(
+                cpuTimeMs = times?.cpuMs ?: 0L,
                 wakeLockTimeMs = wakelockMsByUid[app.uid] ?: 0L,
                 gpsTimeMs = gpsMsByUid[app.uid] ?: 0L,
                 sensorTimeMs = sensorMsByUid[app.uid] ?: 0L,
+                topTimeMs = times?.topMs ?: 0L,
+                // The process-state line is the complete picture; the standalone fg/fgs
+                // timers are only a fallback for dumps that omit it.
+                foregroundTimeMs = times?.let { if (it.hasState) it.fgMs else it.fgTimerMs } ?: 0L,
+                foregroundServiceTimeMs =
+                    times?.let { if (it.hasState) it.fgsMs else it.fgsTimerMs } ?: 0L,
+                backgroundTimeMs = times?.bgMs ?: 0L,
+                cachedTimeMs = times?.cachedMs ?: 0L,
                 mobileRxBytes = net?.mobileRxBytes ?: 0L,
                 mobileTxBytes = net?.mobileTxBytes ?: 0L,
                 wifiRxBytes = net?.wifiRxBytes ?: 0L,
                 wifiTxBytes = net?.wifiTxBytes ?: 0L
             )
         }.sortedByDescending { it.powerMah }
+    }
+
+    /** Per-uid timers gathered from the cpu / fg / fgs / st checkin lines. */
+    private class UidTimes {
+        var cpuMs = 0L
+        var fgTimerMs = 0L
+        var fgsTimerMs = 0L
+        var topMs = 0L
+        var fgsMs = 0L
+        var fgMs = 0L
+        var bgMs = 0L
+        var cachedMs = 0L
+        var hasState = false
+    }
+
+    /**
+     * Process-state times. The column count has grown across Android releases, so only
+     * "top" (the first column) is read unconditionally; the rest need the 7-state layout
+     * that current releases emit.
+     */
+    private fun parseStateTimes(parts: List<String>, uidTimes: MutableMap<Int, UidTimes>) {
+        val uid = parts[1].toIntOrNull() ?: return
+        val times = uidTimes.getOrPut(uid) { UidTimes() }
+        times.topMs += parts.getOrNull(4)?.toLongOrNull() ?: 0L
+        if (parts.size < 11) return
+        times.hasState = true
+        times.fgsMs += parts.getOrNull(5)?.toLongOrNull() ?: 0L
+        times.fgMs += parts.getOrNull(6)?.toLongOrNull() ?: 0L
+        times.bgMs += parts.getOrNull(7)?.toLongOrNull() ?: 0L
+        times.cachedMs += parts.getOrNull(10)?.toLongOrNull() ?: 0L
     }
 
     /** Collapses entries that share a key, preserving first-seen order. */

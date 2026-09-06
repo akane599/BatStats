@@ -826,9 +826,11 @@ private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats) {
                     val timeRows = listOf(
                         "CPU time" to app.cpuTimeMs,
                         "Wakelock time" to app.wakeLockTimeMs,
+                        "Top" to app.topTimeMs,
                         "Foreground" to app.foregroundTimeMs,
                         "Foreground service" to app.foregroundServiceTimeMs,
-                        "Top" to app.topTimeMs,
+                        "Background" to app.backgroundTimeMs,
+                        "Cached" to app.cachedTimeMs,
                         "GPS" to app.gpsTimeMs,
                         "Sensors" to app.sensorTimeMs
                     ).filter { it.second > 0L }

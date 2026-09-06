@@ -131,6 +131,80 @@ class BatteryStatsParserTest {
     }
 
     @Test
+    fun `cpu and process-state times are read from a real dump`() {
+        // Verbatim lines from a device dump (uid 10049 and 10071).
+        val dump = """
+            9,0,i,uid,10049,com.example.sync
+            9,0,i,uid,10071,com.example.app
+            9,10049,l,pwi,uid,50,1,0,0
+            9,10049,l,fgs,90135,18
+            9,10049,l,st,0,9370650,7596684,0,0,0,0
+            9,10049,l,cpu,122404,67158,0
+            9,10071,l,pwi,uid,20,1,0,0
+            9,10071,l,fg,61588,7
+            9,10071,l,st,62137,0,0,6,0,0,12239865
+            9,10071,l,cpu,9508,3312,0
+        """.trimIndent()
+
+        val apps = BatteryStatsParser.parseCheckin(dump).apps.associateBy { it.packageName }
+
+        val sync = apps.getValue("com.example.sync")
+        assertEquals(189_562L, sync.cpuTimeMs)              // 122404 user + 67158 system
+        assertEquals(9_370_650L, sync.foregroundServiceTimeMs)
+        assertEquals(7_596_684L, sync.foregroundTimeMs)
+        assertEquals(0L, sync.topTimeMs)
+
+        val app = apps.getValue("com.example.app")
+        assertEquals(12_820L, app.cpuTimeMs)                // 9508 + 3312
+        assertEquals(62_137L, app.topTimeMs)
+        assertEquals(6L, app.backgroundTimeMs)
+        assertEquals(12_239_865L, app.cachedTimeMs)
+    }
+
+    @Test
+    fun `standalone fg and fgs timers fill in when there is no state line`() {
+        val dump = """
+            9,0,i,uid,10071,com.example.app
+            9,10071,l,pwi,uid,20,1,0,0
+            9,10071,l,fg,61588,7
+            9,10071,l,fgs,1234,2
+        """.trimIndent()
+
+        val app = BatteryStatsParser.parseCheckin(dump).apps.single()
+        assertEquals(61_588L, app.foregroundTimeMs)
+        assertEquals(1_234L, app.foregroundServiceTimeMs)
+    }
+
+    @Test
+    fun `short state lines still yield top time`() {
+        // Older releases emit fewer process-state columns; "top" is the stable one.
+        val dump = """
+            9,0,i,uid,10071,com.example.app
+            9,10071,l,pwi,uid,20,1,0,0
+            9,10071,l,st,5000,0,0
+        """.trimIndent()
+
+        val app = BatteryStatsParser.parseCheckin(dump).apps.single()
+        assertEquals(5_000L, app.topTimeMs)
+        assertEquals(0L, app.cachedTimeMs)
+    }
+
+    @Test
+    fun `network line from a real dump maps to the right columns`() {
+        val dump = """
+            9,0,i,uid,10069,com.example.app
+            9,10069,l,pwi,uid,20,1,0,0
+            9,10069,l,nt,12570,9930,0,0,28,20,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0
+        """.trimIndent()
+
+        val app = BatteryStatsParser.parseCheckin(dump).apps.single()
+        assertEquals(12_570L, app.mobileRxBytes)
+        assertEquals(9_930L, app.mobileTxBytes)
+        assertEquals(0L, app.wifiRxBytes)
+        assertEquals(0L, app.wifiTxBytes)
+    }
+
+    @Test
     fun `apps with no detail lines keep zeroed counters`() {
         val dump = """
             9,0,i,uid,10123,com.example.app

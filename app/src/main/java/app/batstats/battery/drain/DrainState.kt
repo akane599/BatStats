@@ -61,17 +61,25 @@ data class DrainState(
     val totalDrainMah: Double
         get() = screenOnDrainMah + screenOffDrainMah
     
+    /** Wall clock since the session began, including any time spent charging. */
     val totalTimeMs: Long
         get() = System.currentTimeMillis() - sessionStartTime
-    
-    val averageDrainRate: Double
-        get() = drainRateOver(totalDrainMah, totalTimeMs)
 
-    // Time in a state is accumulated on a different cadence to the drain measurements, so
-    // these ratios can momentarily exceed the whole. Clamp rather than render "1307%".
+    /**
+     * Time actually accounted for. Charging stretches are excluded from the buckets - the
+     * battery was being refilled - so this is what the shares below divide by.
+     */
+    val trackedTimeMs: Long
+        get() = screenOnTimeMs + screenOffTimeMs
+
+    val averageDrainRate: Double
+        get() = drainRateOver(totalDrainMah, trackedTimeMs)
+
+    // The buckets reconcile by construction, so these are already within range; the clamp
+    // is a guard against a partially-updated state rather than the arithmetic.
     val screenOnPercentage: Float
-        get() = if (totalTimeMs > 0) {
-            (screenOnTimeMs.toFloat() / totalTimeMs * 100f).coerceIn(0f, 100f)
+        get() = if (trackedTimeMs > 0) {
+            (screenOnTimeMs.toFloat() / trackedTimeMs * 100f).coerceIn(0f, 100f)
         } else 0f
 
     val deepSleepPercentage: Float

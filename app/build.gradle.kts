@@ -60,22 +60,49 @@ android {
         }
     }
 
+    // Release signing is opt-in: with no keystore (a fork, or CI without secrets) the
+    // release variant still builds, it just comes out unsigned instead of failing.
+    val keystoreFile = file(
+        providers.environmentVariable("KEYSTORE_PATH").orNull
+            ?: "${rootProject.projectDir}/release.keystore"
+    )
+    val storePasswordEnv = providers.environmentVariable("STORE_PASSWORD").orNull
+    val keyAliasEnv = providers.environmentVariable("KEY_ALIAS").orNull
+    val keyPasswordEnv = providers.environmentVariable("KEY_PASSWORD").orNull
+    val hasReleaseKeystore = keystoreFile.exists() &&
+        !storePasswordEnv.isNullOrBlank() &&
+        !keyAliasEnv.isNullOrBlank()
+
+    if (!hasReleaseKeystore) {
+        // apk-dist renames the output, so "-unsigned" no longer shows up in the file name.
+        tasks.matching { it.name == "packageRelease" }.configureEach {
+            doFirst {
+                logger.warn(
+                    "No release keystore found at ${keystoreFile.path} (or signing env vars " +
+                        "unset) - the release APK will be UNSIGNED and cannot be installed as is."
+                )
+            }
+        }
+    }
+
     signingConfigs {
-        create("release") {
-            storeFile = file(System.getenv("KEYSTORE_PATH") ?: "${rootProject.projectDir}/release.keystore")
-            storePassword = System.getenv("STORE_PASSWORD")
-            keyAlias = System.getenv("KEY_ALIAS")
-            keyPassword = System.getenv("KEY_PASSWORD")
-            enableV1Signing = true
-            enableV2Signing = true
-            enableV3Signing = false
-            enableV4Signing = false
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = storePasswordEnv
+                keyAlias = keyAliasEnv
+                keyPassword = keyPasswordEnv
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = false
+                enableV4Signing = false
+            }
         }
     }
 
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseKeystore) signingConfigs.getByName("release") else null
             isDebuggable = false
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -167,6 +194,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 
     // Testing
+    testImplementation(libs.junit)
 //    androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     coreLibraryDesugaring(libs.desugar.jdk.libs)

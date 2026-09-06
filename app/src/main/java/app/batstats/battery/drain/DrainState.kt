@@ -65,20 +65,31 @@ data class DrainState(
         get() = System.currentTimeMillis() - sessionStartTime
     
     val averageDrainRate: Double
-        get() = if (totalTimeMs > 0) {
-            (totalDrainMah / (totalTimeMs / 3600000.0))
-        } else 0.0
-    
+        get() = drainRateOver(totalDrainMah, totalTimeMs)
+
+    // Time in a state is accumulated on a different cadence to the drain measurements, so
+    // these ratios can momentarily exceed the whole. Clamp rather than render "1307%".
     val screenOnPercentage: Float
         get() = if (totalTimeMs > 0) {
-            (screenOnTimeMs.toFloat() / totalTimeMs * 100f)
+            (screenOnTimeMs.toFloat() / totalTimeMs * 100f).coerceIn(0f, 100f)
         } else 0f
-    
+
     val deepSleepPercentage: Float
         get() = if (screenOffTimeMs > 0) {
-            (deepSleepTimeMs.toFloat() / screenOffTimeMs * 100f)
+            (deepSleepTimeMs.toFloat() / screenOffTimeMs * 100f).coerceIn(0f, 100f)
         } else 0f
 }
+
+/**
+ * A drain rate is only meaningful once enough time has been observed. Extrapolating from a
+ * couple of seconds turns a single charge-counter step into thousands of mA - a two-second
+ * screen-off window really did read as "12999 mA · 260%/h".
+ */
+const val MIN_RATE_WINDOW_MS = 120_000L
+
+/** mAh over a window, expressed per hour. 0 while the window is too short to mean anything. */
+fun drainRateOver(drainMah: Double, timeMs: Long): Double =
+    if (timeMs >= MIN_RATE_WINDOW_MS) drainMah / (timeMs / 3600000.0) else 0.0
 
 /**
  * Snapshot of drain metrics at a point in time
@@ -122,6 +133,8 @@ fun formatDuration(ms: Long): String {
 
 fun formatDrainRate(rate: Double): String {
     return when {
+        // 0 means "not enough observed time yet", not "drawing nothing".
+        rate <= 0.0 -> "\u2014"
         rate < 0.1 -> "< 0.1 mA"
         rate < 10 -> String.format(java.util.Locale.getDefault(), "%.1f mA", rate)
         else -> String.format(java.util.Locale.getDefault(), "%.0f mA", rate)

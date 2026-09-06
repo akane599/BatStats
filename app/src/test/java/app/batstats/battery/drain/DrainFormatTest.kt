@@ -28,6 +28,30 @@ class DrainFormatTest {
     }
 
     @Test
+    fun `a rate needs enough observed time before it means anything`() {
+        // 9.8 mAh over two seconds extrapolates to ~17600 mA. Refuse rather than report it.
+        assertEquals(0.0, drainRateOver(9.8, 2_000L), 0.0001)
+        assertEquals(0.0, drainRateOver(9.8, MIN_RATE_WINDOW_MS - 1), 0.0001)
+        // Once the window is long enough the arithmetic is the plain one.
+        assertEquals(60.0, drainRateOver(60.0, 3_600_000L), 0.0001)
+    }
+
+    @Test
+    fun `a rate with no usable window reads as unknown, not as zero draw`() {
+        assertEquals("\u2014", formatDrainRate(0.0))
+        assertEquals("\u2014", formatDrainRateWithPercent(0.0, 5000.0))
+        assertEquals("< 0.1 mA", formatDrainRate(0.05))
+    }
+
+    @Test
+    fun `state shares never exceed the whole`() {
+        // Time in a state and the drain samples advance on different cadences, which once
+        // rendered "1307% of screen-off time in deep sleep".
+        val state = DrainState(screenOffTimeMs = 2_000L, deepSleepTimeMs = 35_000L)
+        assertEquals(100f, state.deepSleepPercentage, 0.001f)
+    }
+
+    @Test
     fun `an unknown capacity yields no percentage rather than a made-up one`() {
         assertEquals("", formatBatteryPercent(22.8, 0.0))
         assertEquals("", formatBatteryPercent(22.8, -1.0))

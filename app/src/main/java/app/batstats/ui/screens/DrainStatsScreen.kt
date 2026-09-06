@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.batstats.battery.drain.DrainState
 import app.batstats.battery.drain.formatDrainRate
+import app.batstats.battery.drain.formatBatteryPercent
+import app.batstats.battery.drain.formatBatteryPercentRate
 import app.batstats.battery.drain.formatDrainRateWithPercent
 import app.batstats.battery.drain.formatMahWithPercent
 import app.batstats.battery.drain.formatDuration
@@ -279,7 +281,7 @@ private fun DrainRatesCard(state: DrainState) {
 }
 
 @Composable
-private fun DrainRateItem(
+private fun RowScope.DrainRateItem(
     capacityMah: Double,
     icon: ImageVector,
     label: String,
@@ -287,7 +289,10 @@ private fun DrainRateItem(
     color: Color
 ) {
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        // An equal share of the row: four items sized to their own text used to overflow
+        // and push the last one into a one-character-per-line column.
+        modifier = Modifier.weight(1f)
     ) {
         Surface(
             shape = CircleShape,
@@ -303,14 +308,25 @@ private fun DrainRateItem(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            formatDrainRateWithPercent(rate, capacityMah),
+            formatDrainRate(rate),
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
         )
+        val percent = formatBatteryPercentRate(rate, capacityMah)
+        if (percent.isNotEmpty()) {
+            Text(
+                percent,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                maxLines = 1
+            )
+        }
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
     }
 }
@@ -586,7 +602,7 @@ private fun ActivityBreakdownCard(state: DrainState) {
 }
 
 @Composable
-private fun ActivityStatItem(
+private fun RowScope.ActivityStatItem(
     capacityMah: Double,
     icon: ImageVector,
     label: String,
@@ -597,7 +613,7 @@ private fun ActivityStatItem(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(100.dp)
+        modifier = Modifier.weight(1f)
     ) {
         Surface(
             shape = CircleShape,
@@ -621,23 +637,46 @@ private fun ActivityStatItem(
         )
         
         Text(
-            formatDrainRateWithPercent(drainRate, capacityMah),
+            formatDrainRate(drainRate),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            color = color
+            color = color,
+            maxLines = 1
         )
-        
+
+        val ratePercent = formatBatteryPercentRate(drainRate, capacityMah)
+        if (ratePercent.isNotEmpty()) {
+            Text(
+                ratePercent,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                maxLines = 1
+            )
+        }
+
         Text(
             formatDuration(time),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
-        
+
         Text(
-            formatMahWithPercent(drainTotal, capacityMah),
+            String.format(Locale.getDefault(), "%.1f mAh", drainTotal),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
+
+        val totalPercent = formatBatteryPercent(drainTotal, capacityMah)
+        if (totalPercent.isNotEmpty()) {
+            Text(
+                totalPercent,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
     }
 }
 

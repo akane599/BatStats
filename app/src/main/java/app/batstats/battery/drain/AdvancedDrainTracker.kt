@@ -302,9 +302,8 @@ class AdvancedDrainTracker(
         val screenOnTimeTotal = cumulativeScreenOnTime + if (lastScreenState) pending else 0L
         val screenOffTimeTotal = cumulativeScreenOffTime + if (!lastScreenState) pending else 0L
 
-        fun calculateRate(drainMah: Double, timeMs: Long): Double {
-            return if (timeMs > 0) drainMah / (timeMs / 3600000.0) else 0.0
-        }
+        fun calculateRate(drainMah: Double, timeMs: Long): Double =
+            drainRateOver(drainMah, timeMs)
 
         _drainState.value = DrainState(
             timestamp = now,

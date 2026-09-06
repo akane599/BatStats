@@ -15,6 +15,13 @@ data class DrainState(
     // Current battery level
     val batteryLevel: Int = 0,
     val batteryLevelMah: Double = 0.0,
+
+    /**
+     * Full battery capacity, used to express drain as a share of the battery.
+     * 0 when it could not be established - percentages are then omitted rather than
+     * computed against a guess.
+     */
+    val capacityMah: Double = 0.0,
     
     // Device state
     val isScreenOn: Boolean = false,
@@ -119,4 +126,35 @@ fun formatDrainRate(rate: Double): String {
         rate < 10 -> String.format(java.util.Locale.getDefault(), "%.1f mA", rate)
         else -> String.format(java.util.Locale.getDefault(), "%.0f mA", rate)
     }
+}
+
+/** Formats [mah] as a share of [capacityMah]; empty when the capacity is unknown. */
+fun formatBatteryPercent(mah: Double, capacityMah: Double): String {
+    if (capacityMah <= 0.0 || mah <= 0.0) return ""
+    val percent = mah / capacityMah * 100.0
+    return when {
+        percent < 0.01 -> "< 0.01%"
+        percent < 1 -> String.format(java.util.Locale.getDefault(), "%.2f%%", percent)
+        else -> String.format(java.util.Locale.getDefault(), "%.1f%%", percent)
+    }
+}
+
+/** Same, per hour - a drain rate in mA is mAh per hour. */
+fun formatBatteryPercentRate(ratePerHour: Double, capacityMah: Double): String {
+    val percent = formatBatteryPercent(ratePerHour, capacityMah)
+    return if (percent.isEmpty()) "" else "$percent/h"
+}
+
+/** "22.8 mAh · 0.5%", or just the mAh when the capacity is unknown. */
+fun formatMahWithPercent(mah: Double, capacityMah: Double): String {
+    val value = String.format(java.util.Locale.getDefault(), "%.1f mAh", mah)
+    val percent = formatBatteryPercent(mah, capacityMah)
+    return if (percent.isEmpty()) value else "$value · $percent"
+}
+
+/** "45 mA · 1.1%/h", or just the rate when the capacity is unknown. */
+fun formatDrainRateWithPercent(rate: Double, capacityMah: Double): String {
+    val value = formatDrainRate(rate)
+    val percent = formatBatteryPercentRate(rate, capacityMah)
+    return if (percent.isEmpty()) value else "$value · $percent"
 }

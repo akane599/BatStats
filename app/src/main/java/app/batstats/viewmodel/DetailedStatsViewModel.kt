@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.batstats.battery.shizuku.ShizukuBridge
+import app.batstats.battery.util.BatteryCapacity
 import app.batstats.battery.util.DetailedStatsCollector
 import app.batstats.battery.util.PrivilegeChecker
 import app.batstats.battery.util.RootStatsCollector
@@ -52,6 +53,10 @@ class DetailedStatsViewModel(
 
     private val _kernelBattery = MutableStateFlow<RootStatsCollector.KernelBatteryInfo?>(null)
     val kernelBattery: StateFlow<RootStatsCollector.KernelBatteryInfo?> = _kernelBattery.asStateFlow()
+
+    /** Full battery capacity, or 0 when unknown - percentages are then not shown. */
+    private val _capacityMah = MutableStateFlow(0.0)
+    val capacityMah: StateFlow<Double> = _capacityMah.asStateFlow()
 
     private var refreshJob: Job? = null
 
@@ -115,6 +120,12 @@ class DetailedStatsViewModel(
             if (_hasAdvanced.value) {
                 collector.refresh()
             }
+            // batterystats reports the capacity Android itself attributes against; measure
+            // it only if the dump did not carry one.
+            _capacityMah.value = BatteryCapacity.resolveMah(
+                context,
+                collector.snapshot.value?.estimatedCapacityMah ?: 0
+            ) ?: 0.0
             if (_hasRoot.value) {
                 _kernelBattery.value = RootStatsCollector.getKernelBatteryInfo()
             }

@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import app.batstats.battery.shizuku.ShizukuBridge
+import app.batstats.battery.util.BatteryCapacity
 import app.batstats.battery.util.BatteryStatsParser
 import app.batstats.battery.util.ShellRunner
 import app.batstats.settings.AppSettings
@@ -59,6 +60,13 @@ class AdvancedDrainTracker(
     private var lastScreenChangeTime: Long = System.currentTimeMillis()
     private var receiverRegistered = false
     private var estimatedCapacityMah: Double = 4000.0
+
+    /**
+     * Only ever set from a real source (batterystats, or the charge counter). Unlike
+     * [estimatedCapacityMah], which carries a placeholder so the mAh maths has something
+     * to work with, 0 here means "unknown" and percentages are left off.
+     */
+    private var knownCapacityMah: Double = 0.0
 
     private var detailedStatsIntervalMs: Long = 300_000L
     private var lastDumpsysTime: Long = 0L
@@ -281,6 +289,12 @@ class AdvancedDrainTracker(
     private fun updateDrainState() {
         val now = System.currentTimeMillis()
 
+        // batterystats is the preferred source, but it needs a privileged dump; fall
+        // back to measuring so percentages still work without one.
+        if (knownCapacityMah <= 0.0) {
+            BatteryCapacity.measuredMah(context)?.let { knownCapacityMah = it }
+        }
+
         // Screen time only lands in the cumulative counters when the screen state flips, so
         // fold in the interval that is still running - otherwise the rates read 0 until the
         // user toggles the screen.
@@ -296,6 +310,7 @@ class AdvancedDrainTracker(
             timestamp = now,
             batteryLevel = getBatteryLevel(),
             batteryLevelMah = getCurrentBatteryMah(),
+            capacityMah = knownCapacityMah,
             isScreenOn = powerManager.isInteractive,
             isCharging = isCharging(),
             isDeepSleep = isInDeepSleep(),
@@ -383,8 +398,10 @@ class AdvancedDrainTracker(
                 val sleepTime = snapshot.doze?.deepIdleTimeMs ?: 0L
                 cachedAwakeTime = awakeTime
                 cachedDeepSleepTime = sleepTime
-                if (snapshot.estimatedCapacityMah > 0) {
-                    estimatedCapacityMah = snapshot.estimatedCapacityMah.toDouble()
+                val reported = snapshot.estimatedCapacityMah.toDouble()
+                if (BatteryCapacity.isPlausible(reported)) {
+                    estimatedCapacityMah = reported
+                    knownCapacityMah = reported
                 }
                 lastDumpsysTime = System.currentTimeMillis()
                 return Pair(awakeTime, sleepTime)

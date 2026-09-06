@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.batstats.battery.drain.DrainState
 import app.batstats.battery.drain.formatDrainRate
+import app.batstats.battery.drain.formatDrainRateWithPercent
+import app.batstats.battery.drain.formatMahWithPercent
 import app.batstats.battery.drain.formatDuration
 import app.batstats.viewmodel.DrainStatsViewModel
 import org.koin.androidx.compose.koinViewModel
@@ -215,7 +217,7 @@ private fun CurrentStateCard(state: DrainState) {
                 )
                 
                 Text(
-                    "Total drain: ${String.format(Locale.getDefault(), "%.1f mAh", state.totalDrainMah)}",
+                    "Total drain: ${formatMahWithPercent(state.totalDrainMah, state.capacityMah)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -244,24 +246,28 @@ private fun DrainRatesCard(state: DrainState) {
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 DrainRateItem(
+                    capacityMah = state.capacityMah,
                     icon = Icons.Outlined.Smartphone,
                     label = "Screen On",
                     rate = state.screenOnDrainRate,
                     color = Color(0xFFFF9800)
                 )
                 DrainRateItem(
+                    capacityMah = state.capacityMah,
                     icon = Icons.Outlined.PhonelinkErase,
                     label = "Screen Off",
                     rate = state.screenOffDrainRate,
                     color = Color(0xFF2196F3)
                 )
                 DrainRateItem(
+                    capacityMah = state.capacityMah,
                     icon = Icons.Outlined.NightsStay,
                     label = "Deep Sleep",
                     rate = state.deepSleepDrainRate,
                     color = Color(0xFF4CAF50)
                 )
                 DrainRateItem(
+                    capacityMah = state.capacityMah,
                     icon = Icons.Outlined.WbSunny,
                     label = "Awake",
                     rate = state.awakeDrainRate,
@@ -274,6 +280,7 @@ private fun DrainRatesCard(state: DrainState) {
 
 @Composable
 private fun DrainRateItem(
+    capacityMah: Double,
     icon: ImageVector,
     label: String,
     rate: Double,
@@ -296,7 +303,7 @@ private fun DrainRateItem(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            formatDrainRate(rate),
+            formatDrainRateWithPercent(rate, capacityMah),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold
         )
@@ -327,6 +334,7 @@ private fun ScreenBreakdownCard(state: DrainState) {
             DrainStatRow(
                 icon = Icons.Outlined.Smartphone,
                 label = "Screen On",
+                capacityMah = state.capacityMah,
                 drainRate = state.screenOnDrainRate,
                 drainTotal = state.screenOnDrainMah,
                 time = state.screenOnTimeMs,
@@ -340,6 +348,7 @@ private fun ScreenBreakdownCard(state: DrainState) {
             DrainStatRow(
                 icon = Icons.Outlined.PhonelinkErase,
                 label = "Screen Off",
+                capacityMah = state.capacityMah,
                 drainRate = state.screenOffDrainRate,
                 drainTotal = state.screenOffDrainMah,
                 time = state.screenOffTimeMs,
@@ -352,6 +361,7 @@ private fun ScreenBreakdownCard(state: DrainState) {
 
 @Composable
 private fun DrainStatRow(
+    capacityMah: Double,
     icon: ImageVector,
     label: String,
     drainRate: Double,
@@ -370,7 +380,7 @@ private fun DrainStatRow(
             Text(label, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.weight(1f))
             Text(
-                formatDrainRate(drainRate),
+                formatDrainRateWithPercent(drainRate, capacityMah),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 color = color
@@ -389,7 +399,7 @@ private fun DrainStatRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                String.format(Locale.getDefault(), "%.1f mAh", drainTotal),
+                formatMahWithPercent(drainTotal, capacityMah),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -492,7 +502,7 @@ private fun DeepSleepCard(state: DrainState) {
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        formatDrainRate(state.deepSleepDrainRate),
+                        formatDrainRateWithPercent(state.deepSleepDrainRate, state.capacityMah),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -504,7 +514,7 @@ private fun DeepSleepCard(state: DrainState) {
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        String.format(Locale.getDefault(), "%.1f mAh", state.deepSleepDrainMah),
+                        formatMahWithPercent(state.deepSleepDrainMah, state.capacityMah),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -542,6 +552,7 @@ private fun ActivityBreakdownCard(state: DrainState) {
                 ActivityStatItem(
                     icon = Icons.Outlined.FlashOn,
                     label = "Active",
+                    capacityMah = state.capacityMah,
                     drainRate = state.activeDrainRate,
                     time = state.activeTimeMs,
                     drainTotal = state.activeDrainMah,
@@ -552,6 +563,7 @@ private fun ActivityBreakdownCard(state: DrainState) {
                 ActivityStatItem(
                     icon = Icons.Outlined.Bedtime,
                     label = "Idle",
+                    capacityMah = state.capacityMah,
                     drainRate = state.idleDrainRate,
                     time = state.idleTimeMs,
                     drainTotal = state.idleDrainMah,
@@ -562,6 +574,7 @@ private fun ActivityBreakdownCard(state: DrainState) {
                 ActivityStatItem(
                     icon = Icons.Outlined.WbSunny,
                     label = "Awake",
+                    capacityMah = state.capacityMah,
                     drainRate = state.awakeDrainRate,
                     time = state.awakeTimeMs,
                     drainTotal = state.awakeDrainMah,
@@ -574,6 +587,7 @@ private fun ActivityBreakdownCard(state: DrainState) {
 
 @Composable
 private fun ActivityStatItem(
+    capacityMah: Double,
     icon: ImageVector,
     label: String,
     drainRate: Double,
@@ -607,7 +621,7 @@ private fun ActivityStatItem(
         )
         
         Text(
-            formatDrainRate(drainRate),
+            formatDrainRateWithPercent(drainRate, capacityMah),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
             color = color
@@ -620,7 +634,7 @@ private fun ActivityStatItem(
         )
         
         Text(
-            String.format(Locale.getDefault(), "%.1f mAh", drainTotal),
+            formatMahWithPercent(drainTotal, capacityMah),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -656,12 +670,12 @@ private fun SessionSummaryCard(state: DrainState) {
                 )
                 SummaryItem(
                     label = "Total Drain",
-                    value = String.format(Locale.getDefault(), "%.1f mAh", state.totalDrainMah),
+                    value = formatMahWithPercent(state.totalDrainMah, state.capacityMah),
                     icon = Icons.Outlined.BatteryAlert
                 )
                 SummaryItem(
                     label = "Avg Rate",
-                    value = formatDrainRate(state.averageDrainRate),
+                    value = formatDrainRateWithPercent(state.averageDrainRate, state.capacityMah),
                     icon = Icons.Outlined.Speed
                 )
             }

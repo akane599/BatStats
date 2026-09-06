@@ -34,6 +34,8 @@ import android.provider.Settings
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.platform.LocalContext
+import app.batstats.battery.drain.formatBatteryPercent
+import app.batstats.battery.drain.formatMahWithPercent
 import app.batstats.battery.util.BatteryStatsParser
 import app.batstats.battery.util.RootStatsCollector
 import app.batstats.battery.util.ShellRunner
@@ -65,6 +67,7 @@ fun DetailedStatsScreen(
     val hasAdvanced by vm.hasAdvanced.collectAsStateWithLifecycle()
     val advMode by vm.advMode.collectAsStateWithLifecycle()
     val kernelBattery by vm.kernelBattery.collectAsStateWithLifecycle()
+    val capacityMah by vm.capacityMah.collectAsStateWithLifecycle()
 
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -201,7 +204,7 @@ fun DetailedStatsScreen(
                 ) { page ->
                     when (page) {
                         0 -> OverviewTab(snapshot, deviceIdle, powerManager)
-                        1 -> AppsTab(snapshot?.apps ?: emptyList())
+                        1 -> AppsTab(snapshot?.apps ?: emptyList(), capacityMah)
                         2 -> WakelocksTab(snapshot?.wakelocks ?: emptyList(), snapshot?.kernelWakelocks ?: emptyList())
                         3 -> NetworkTab(snapshot?.network ?: emptyList())
                         4 -> AlarmsJobsTab(snapshot?.alarms ?: emptyList(), snapshot?.jobs ?: emptyList(), snapshot?.syncs ?: emptyList())
@@ -719,7 +722,7 @@ private fun CurrentStateCard(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppsTab(apps: List<BatteryStatsParser.AppPowerStats>) {
+private fun AppsTab(apps: List<BatteryStatsParser.AppPowerStats>, capacityMah: Double) {
     var sortBy by remember { mutableStateOf(AppSortOption.POWER) }
     var showSystemApps by remember { mutableStateOf(false) }
 
@@ -800,7 +803,7 @@ private fun AppsTab(apps: List<BatteryStatsParser.AppPowerStats>) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 itemsIndexed(filteredApps, key = { _, app -> app.uid }) { index, app ->
-                    AppStatsCard(index + 1, app)
+                    AppStatsCard(index + 1, app, capacityMah)
                 }
             }
         }
@@ -816,7 +819,7 @@ private enum class AppSortOption(val label: String) {
 }
 
 @Composable
-private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats) {
+private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats, capacityMah: Double) {
     var expanded by remember { mutableStateOf(false) }
 
     ElevatedCard(
@@ -848,7 +851,7 @@ private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats) {
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        String.format(Locale.getDefault(), "%.2f mAh", app.powerMah),
+                        formatMahWithPercent(app.powerMah, capacityMah),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -904,13 +907,16 @@ private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats) {
                     ).filter { it.second > 0L }
 
                     Text("Power Breakdown", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    StatRow("Total", formatMah(app.powerMah))
+                    StatRow("Total", formatMahWithPercent(app.powerMah, capacityMah))
                     // Android attributes an app's drain by process state, not by component.
                     app.powerByState.forEach { state ->
-                        val value = if (state.durationMs > 0L) {
-                            "${formatMah(state.powerMah)} · ${formatDuration(state.durationMs)}"
-                        } else {
-                            formatMah(state.powerMah)
+                        val percent = formatBatteryPercent(state.powerMah, capacityMah)
+                        val value = buildString {
+                            append(formatMah(state.powerMah))
+                            if (percent.isNotEmpty()) append(" · ").append(percent)
+                            if (state.durationMs > 0L) {
+                                append(" · ").append(formatDuration(state.durationMs))
+                            }
                         }
                         StatRow(state.label, value)
                     }

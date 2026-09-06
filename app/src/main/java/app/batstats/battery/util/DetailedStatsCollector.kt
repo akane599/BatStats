@@ -85,7 +85,11 @@ class DetailedStatsCollector(
                     val parsed = BatteryStatsParser.parseCheckin(stats.output)
                     _snapshot.value = parsed
                     hasData = true
-                    Log.d(TAG, "Parsed ${parsed.apps.size} apps, ${parsed.wakelocks.size} wakelocks")
+                    Log.d(
+                        TAG,
+                        "Parsed ${parsed.apps.size} apps, ${parsed.wakelocks.size} wakelocks, " +
+                            "${parsed.mappedPackages} package names"
+                    )
                 }
 
                 is ShellRunner.Outcome.Failure -> {

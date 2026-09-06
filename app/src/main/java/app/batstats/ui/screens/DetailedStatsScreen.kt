@@ -183,6 +183,17 @@ fun DetailedStatsScreen(
 
                 HorizontalDivider()
 
+                // Running via ADB means dumpsys executes as BatStats itself, and Android
+                // filters the dump's uid -> package map to packages this app may see - so
+                // most rows degrade to "uid:NNNNN". Shizuku runs it as shell, which sees
+                // everything. Say so rather than silently showing worse data.
+                if (advMode == ShellRunner.Mode.ADB && shizukuRunning && !hasShizuku) {
+                    AdbNameLimitNote(
+                        denied = shizukuDenied,
+                        onRequestShizuku = { vm.requestShizukuPermission() }
+                    )
+                }
+
                 // Pager content
                 HorizontalPager(
                     state = pagerState,
@@ -243,6 +254,57 @@ fun DetailedStatsScreen(
 }
 
 private data class StatsTab(val title: String, val icon: ImageVector)
+
+/**
+ * Shown when the ADB backend is in use while Shizuku is running but unauthorised - the
+ * case where the app is quietly serving worse data than it could.
+ */
+@Composable
+private fun AdbNameLimitNote(denied: Boolean, onRequestShizuku: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 10.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Outlined.Info,
+                null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "App names limited",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Text(
+                    if (denied) {
+                        "ADB access runs the dump as BatStats, so Android hides most package " +
+                            "names. Shizuku is running but this app is not authorised - " +
+                            "re-authorise it in Shizuku to see real names."
+                    } else {
+                        "ADB access runs the dump as BatStats, so Android hides most package " +
+                            "names. Shizuku is running and would show them."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+            if (!denied) {
+                TextButton(onClick = onRequestShizuku) { Text("Grant") }
+            }
+        }
+    }
+}
 
 @Composable
 private fun PrivilegeRequiredCard(

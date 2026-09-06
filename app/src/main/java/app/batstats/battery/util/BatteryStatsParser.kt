@@ -29,7 +29,13 @@ object BatteryStatsParser {
         val bluetooth: BluetoothStats? = null,
         val doze: DozeStats? = null,
         val cpuFrequency: List<CpuFrequencyStats> = emptyList(),
-        val processStats: List<ProcessStats> = emptyList()
+        val processStats: List<ProcessStats> = emptyList(),
+        /**
+         * How many uid -> package mappings the dump carried. Well below [apps] size means
+         * the dump was produced by a caller that cannot see most packages, so rows fall
+         * back to "uid:NNNNN" - see the ADB note in DetailedStatsScreen.
+         */
+        val mappedPackages: Int = 0
     )
 
     data class AppPowerStats(
@@ -429,6 +435,7 @@ object BatteryStatsParser {
             screenOffDischargePercent = screenOffDischarge,
             screenOnDischargePercent = screenOnDischarge,
             estimatedCapacityMah = estCapacity,
+            mappedPackages = uidToPkg.size,
             apps = joinPerUidDetail(
                 appStats.values, mergedWakelocks, mergedNetwork, mergedSensors, uidTimes
             ).map { it.copy(packageName = named(it.uid)) },

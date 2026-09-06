@@ -27,6 +27,7 @@ shizuku = "13.1.5"
 documentfile = "1.1.0"
 apkDist = "0.5.2"
 composeBom = "2026.08.01"
+junit = "4.13.2"
 
 [libraries]
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom-alpha", version.ref = "composeBom" }
@@ -44,6 +45,7 @@ androidx-runtime = { module = "androidx.compose.runtime:runtime", version.ref = 
 api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
 core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 desugar_jdk_libs = { module = "com.android.tools:desugar_jdk_libs", version.ref = "desugar_jdk_libs" }
+junit = { module = "junit:junit", version.ref = "junit" }
 kmp-settings-core = { module = "io.github.mlm-games:kmp-settings-core", version.ref = "kmpSettingsCore" }
 kmp-settings-ksp = { module = "io.github.mlm-games:kmp-settings-ksp", version.ref = "kmpSettingsCore" }
 kmp-settings-ui-compose = { module = "io.github.mlm-games:kmp-settings-ui-compose", version.ref = "kmpSettingsCore" }

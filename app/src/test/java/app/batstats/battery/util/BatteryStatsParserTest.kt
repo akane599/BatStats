@@ -89,6 +89,61 @@ class BatteryStatsParserTest {
     }
 
     @Test
+    fun `device-wide power rows are not mistaken for apps`() {
+        // Real rows from a device: only the "uid" label is per-app, the rest are global
+        // component totals reported against uid 0.
+        val dump = """
+            9,0,i,uid,10123,com.example.app
+            9,0,l,pwi,scrn,343,1,0,0
+            9,0,l,pwi,cpu,230,0,0,0
+            9,0,l,pwi,cell,256,1,0,0
+            9,0,l,pwi,gnss,0.682,0,0,0
+            9,0,l,pwi,???,15.8,0,0,0
+            9,10123,l,pwi,uid,108,1,0,0
+        """.trimIndent()
+
+        val apps = BatteryStatsParser.parseCheckin(dump).apps
+        assertEquals(1, apps.size)
+        assertEquals("com.example.app", apps[0].packageName)
+        assertEquals(108.0, apps[0].powerMah, 0.001)
+    }
+
+    @Test
+    fun `per-uid wakelock, network and sensor detail is joined onto the app row`() {
+        val dump = """
+            9,0,i,uid,10123,com.example.app
+            9,10123,l,pwi,uid,108,1,0,0
+            9,10123,l,wl,LockA,0,f,0,0,0,60000,p,12,0,0,0
+            9,10123,l,wl,LockB,0,f,0,0,0,30000,p,4,0,0,0
+            9,10123,l,nt,111,222,333,444,1,2,3,4,0,0,5000,7
+            9,10123,l,sr,-10000,90000,3
+            9,10123,l,sr,4,45000,9
+        """.trimIndent()
+
+        val app = BatteryStatsParser.parseCheckin(dump).apps.single()
+        assertEquals(90_000L, app.wakeLockTimeMs)   // 60000 + 30000
+        assertEquals(90_000L, app.gpsTimeMs)        // sensor handle -10000
+        assertEquals(45_000L, app.sensorTimeMs)     // everything else
+        assertEquals(111L, app.mobileRxBytes)
+        assertEquals(222L, app.mobileTxBytes)
+        assertEquals(333L, app.wifiRxBytes)
+        assertEquals(444L, app.wifiTxBytes)
+    }
+
+    @Test
+    fun `apps with no detail lines keep zeroed counters`() {
+        val dump = """
+            9,0,i,uid,10123,com.example.app
+            9,10123,l,pwi,uid,108,1,0,0
+        """.trimIndent()
+
+        val app = BatteryStatsParser.parseCheckin(dump).apps.single()
+        assertEquals(0L, app.wakeLockTimeMs)
+        assertEquals(0L, app.mobileRxBytes)
+        assertEquals(108.0, app.powerMah, 0.001)
+    }
+
+    @Test
     fun `wakelock partial block is located by its marker`() {
         // wl = tag, then "<time>,f,<count>,...", "<time>,p,<count>,...", "<time>,bp,<count>,..."
         val dump = """

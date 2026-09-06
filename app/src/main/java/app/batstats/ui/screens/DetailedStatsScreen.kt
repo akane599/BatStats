@@ -807,32 +807,63 @@ private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats) {
                     HorizontalDivider()
                     Spacer(Modifier.height(8.dp))
 
+                    // Only rows the dump actually carries a value for. batterystats does not
+                    // report a per-component mAh split per app, and it omits counters an app
+                    // never touched - printing "0.00 mAh" for those reads like real data.
+                    val powerRows = listOf(
+                        "Screen" to app.screenPowerMah,
+                        "CPU" to app.cpuPowerMah,
+                        "Wakelock" to app.wakeLockPowerMah,
+                        "Mobile radio" to app.mobilePowerMah,
+                        "WiFi" to app.wifiPowerMah,
+                        "GPS" to app.gpsPowerMah,
+                        "Sensors" to app.sensorPowerMah,
+                        "Camera" to app.cameraPowerMah,
+                        "Bluetooth" to app.bluetoothPowerMah,
+                        "Proportional smear" to app.proportionalSmearMah
+                    ).filter { it.second > 0.0 }
+
+                    val timeRows = listOf(
+                        "CPU time" to app.cpuTimeMs,
+                        "Wakelock time" to app.wakeLockTimeMs,
+                        "Foreground" to app.foregroundTimeMs,
+                        "Foreground service" to app.foregroundServiceTimeMs,
+                        "Top" to app.topTimeMs,
+                        "GPS" to app.gpsTimeMs,
+                        "Sensors" to app.sensorTimeMs
+                    ).filter { it.second > 0L }
+
+                    val networkRows = listOf(
+                        "Mobile RX" to app.mobileRxBytes,
+                        "Mobile TX" to app.mobileTxBytes,
+                        "WiFi RX" to app.wifiRxBytes,
+                        "WiFi TX" to app.wifiTxBytes
+                    ).filter { it.second > 0L }
+
                     Text("Power Breakdown", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    StatRow("CPU", String.format(Locale.getDefault(), "%.2f mAh", app.cpuPowerMah))
-                    StatRow("Wakelock", String.format(Locale.getDefault(), "%.2f mAh", app.wakeLockPowerMah))
-                    StatRow("Mobile radio", String.format(Locale.getDefault(), "%.2f mAh", app.mobilePowerMah))
-                    StatRow("WiFi", String.format(Locale.getDefault(), "%.2f mAh", app.wifiPowerMah))
-                    StatRow("GPS", String.format(Locale.getDefault(), "%.2f mAh", app.gpsPowerMah))
-                    StatRow("Sensors", String.format(Locale.getDefault(), "%.2f mAh", app.sensorPowerMah))
-                    StatRow("Camera", String.format(Locale.getDefault(), "%.2f mAh", app.cameraPowerMah))
-                    StatRow("Bluetooth", String.format(Locale.getDefault(), "%.2f mAh", app.bluetoothPowerMah))
+                    StatRow("Total", String.format(Locale.getDefault(), "%.2f mAh", app.powerMah))
+                    powerRows.forEach { (label, mah) ->
+                        StatRow(label, String.format(Locale.getDefault(), "%.2f mAh", mah))
+                    }
+                    if (powerRows.isEmpty()) {
+                        Text(
+                            "No per-component split reported for this app.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
 
-                    Spacer(Modifier.height(8.dp))
-                    Text("Time Usage", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    StatRow("CPU time", formatDuration(app.cpuTimeMs))
-                    StatRow("Wakelock time", formatDuration(app.wakeLockTimeMs))
-                    StatRow("Foreground", formatDuration(app.foregroundTimeMs))
-                    StatRow("Foreground service", formatDuration(app.foregroundServiceTimeMs))
-                    StatRow("Top", formatDuration(app.topTimeMs))
-                    StatRow("GPS", formatDuration(app.gpsTimeMs))
-                    StatRow("Sensors", formatDuration(app.sensorTimeMs))
+                    if (timeRows.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Time Usage", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        timeRows.forEach { (label, ms) -> StatRow(label, formatDuration(ms)) }
+                    }
 
-                    Spacer(Modifier.height(8.dp))
-                    Text("Network", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    StatRow("Mobile RX", formatBytes(app.mobileRxBytes))
-                    StatRow("Mobile TX", formatBytes(app.mobileTxBytes))
-                    StatRow("WiFi RX", formatBytes(app.wifiRxBytes))
-                    StatRow("WiFi TX", formatBytes(app.wifiTxBytes))
+                    if (networkRows.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Network", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        networkRows.forEach { (label, bytes) -> StatRow(label, formatBytes(bytes)) }
+                    }
                 }
             }
         }

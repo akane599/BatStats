@@ -330,6 +330,39 @@ object BatteryStatsParser {
         // The lists below are rendered with LazyColumn item keys, and Compose throws when a
         // key repeats. A checkin dump can legitimately repeat a (uid, tag) pair - one line
         // per wakelock type, per user profile - so merge duplicates instead of emitting them.
+        val mergedWakelocks = wakelocks
+            .mergeBy({ it.uid to it.tag }) { a, b ->
+                a.copy(
+                    count = a.count + b.count,
+                    totalTimeMs = a.totalTimeMs + b.totalTimeMs,
+                    maxTimeMs = maxOf(a.maxTimeMs, b.maxTimeMs),
+                    backgroundTimeMs = a.backgroundTimeMs + b.backgroundTimeMs,
+                    backgroundCount = a.backgroundCount + b.backgroundCount
+                )
+            }
+            .sortedByDescending { it.totalTimeMs }
+
+        val mergedNetwork = network
+            .mergeBy({ it.uid }) { a, b ->
+                a.copy(
+                    mobileRxBytes = a.mobileRxBytes + b.mobileRxBytes,
+                    mobileTxBytes = a.mobileTxBytes + b.mobileTxBytes,
+                    wifiRxBytes = a.wifiRxBytes + b.wifiRxBytes,
+                    wifiTxBytes = a.wifiTxBytes + b.wifiTxBytes,
+                    mobileActiveTimeMs = a.mobileActiveTimeMs + b.mobileActiveTimeMs,
+                    mobileActiveCount = a.mobileActiveCount + b.mobileActiveCount
+                )
+            }
+            .sortedByDescending {
+                it.mobileRxBytes + it.mobileTxBytes + it.wifiRxBytes + it.wifiTxBytes
+            }
+
+        val mergedSensors = sensors
+            .mergeBy({ it.uid to it.sensorHandle }) { a, b ->
+                a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
+            }
+            .sortedByDescending { it.totalTimeMs }
+
         return FullSnapshot(
             capturedAt = System.currentTimeMillis(),
             batteryRealtimeMs = batteryRealtimeMs,
@@ -337,18 +370,8 @@ object BatteryStatsParser {
             screenOffDischargePercent = screenOffDischarge,
             screenOnDischargePercent = screenOnDischarge,
             estimatedCapacityMah = estCapacity,
-            apps = appStats.values.sortedByDescending { it.powerMah },
-            wakelocks = wakelocks
-                .mergeBy({ it.uid to it.tag }) { a, b ->
-                    a.copy(
-                        count = a.count + b.count,
-                        totalTimeMs = a.totalTimeMs + b.totalTimeMs,
-                        maxTimeMs = maxOf(a.maxTimeMs, b.maxTimeMs),
-                        backgroundTimeMs = a.backgroundTimeMs + b.backgroundTimeMs,
-                        backgroundCount = a.backgroundCount + b.backgroundCount
-                    )
-                }
-                .sortedByDescending { it.totalTimeMs },
+            apps = joinPerUidDetail(appStats.values, mergedWakelocks, mergedNetwork, mergedSensors),
+            wakelocks = mergedWakelocks,
             kernelWakelocks = kernelWakelocks
                 .mergeBy({ it.name }) { a, b ->
                     a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
@@ -373,25 +396,8 @@ object BatteryStatsParser {
                     a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
                 }
                 .sortedByDescending { it.totalTimeMs },
-            network = network
-                .mergeBy({ it.uid }) { a, b ->
-                    a.copy(
-                        mobileRxBytes = a.mobileRxBytes + b.mobileRxBytes,
-                        mobileTxBytes = a.mobileTxBytes + b.mobileTxBytes,
-                        wifiRxBytes = a.wifiRxBytes + b.wifiRxBytes,
-                        wifiTxBytes = a.wifiTxBytes + b.wifiTxBytes,
-                        mobileActiveTimeMs = a.mobileActiveTimeMs + b.mobileActiveTimeMs,
-                        mobileActiveCount = a.mobileActiveCount + b.mobileActiveCount
-                    )
-                }
-                .sortedByDescending {
-                    it.mobileRxBytes + it.mobileTxBytes + it.wifiRxBytes + it.wifiTxBytes
-                },
-            sensors = sensors
-                .mergeBy({ it.uid to it.sensorHandle }) { a, b ->
-                    a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
-                }
-                .sortedByDescending { it.totalTimeMs },
+            network = mergedNetwork,
+            sensors = mergedSensors,
             signalStrength = signalStrength,
             wifiSignal = wifiSignal,
             bluetooth = bluetooth,
@@ -408,6 +414,45 @@ object BatteryStatsParser {
                 }
                 .sortedByDescending { it.userTimeMs + it.systemTimeMs }
         )
+    }
+
+    /**
+     * Folds the per-uid detail back onto the app rows.
+     *
+     * The checkin dump reports an app's wakelocks, network counters and sensor usage on
+     * their own lines, which this parser collects into separate top-level lists. Nothing
+     * ever joined them back onto [AppPowerStats], so every one of those fields on the Apps
+     * tab rendered its data-class default of zero even though the numbers were right there.
+     */
+    private fun joinPerUidDetail(
+        apps: Collection<AppPowerStats>,
+        wakelocks: List<WakelockStats>,
+        network: List<NetworkStats>,
+        sensors: List<SensorStats>
+    ): List<AppPowerStats> {
+        if (apps.isEmpty()) return emptyList()
+
+        val wakelockMsByUid = wakelocks.groupingBy { it.uid }.fold(0L) { acc, w -> acc + w.totalTimeMs }
+        val networkByUid = network.associateBy { it.uid }
+        val gpsMsByUid = sensors.asSequence()
+            .filter { it.sensorHandle == GPS_SENSOR_HANDLE }
+            .groupingBy { it.uid }.fold(0L) { acc, s -> acc + s.totalTimeMs }
+        val sensorMsByUid = sensors.asSequence()
+            .filter { it.sensorHandle != GPS_SENSOR_HANDLE }
+            .groupingBy { it.uid }.fold(0L) { acc, s -> acc + s.totalTimeMs }
+
+        return apps.map { app ->
+            val net = networkByUid[app.uid]
+            app.copy(
+                wakeLockTimeMs = wakelockMsByUid[app.uid] ?: 0L,
+                gpsTimeMs = gpsMsByUid[app.uid] ?: 0L,
+                sensorTimeMs = sensorMsByUid[app.uid] ?: 0L,
+                mobileRxBytes = net?.mobileRxBytes ?: 0L,
+                mobileTxBytes = net?.mobileTxBytes ?: 0L,
+                wifiRxBytes = net?.wifiRxBytes ?: 0L,
+                wifiTxBytes = net?.wifiTxBytes ?: 0L
+            )
+        }.sortedByDescending { it.powerMah }
     }
 
     /** Collapses entries that share a key, preserving first-seen order. */
@@ -431,10 +476,19 @@ object BatteryStatsParser {
         val type = parts.getOrNull(4) ?: return
         val mah = parts.getOrNull(5)?.toDoubleOrNull() ?: 0.0
 
+        // 9,<uid>,l,pwi,<label>,<mAh>,<shouldHide>,<screenMah>,<smearMah>
+        // Only rows labelled "uid" are per-app; the rest are device-wide component totals
+        // (scrn, cpu, cell, gnss, ...) reported against uid 0.
         if (type == "uid") {
             val pkg = uidToPkg[uid] ?: "uid:$uid"
+            val screen = parts.getOrNull(7)?.toDoubleOrNull() ?: 0.0
+            val smear = parts.getOrNull(8)?.toDoubleOrNull() ?: 0.0
             val existing = appStats[uid] ?: AppPowerStats(uid = uid, packageName = pkg, powerMah = 0.0)
-            appStats[uid] = existing.copy(powerMah = existing.powerMah + mah)
+            appStats[uid] = existing.copy(
+                powerMah = existing.powerMah + mah,
+                screenPowerMah = existing.screenPowerMah + screen,
+                proportionalSmearMah = existing.proportionalSmearMah + smear
+            )
         }
     }
 
@@ -760,8 +814,11 @@ object BatteryStatsParser {
         )
     }
 
+    /** batterystats reports GPS as a pseudo-sensor with this handle. */
+    private const val GPS_SENSOR_HANDLE = -10000
+
     private fun getSensorName(handle: Int): String = when (handle) {
-        -10000 -> "GPS"
+        GPS_SENSOR_HANDLE -> "GPS"
         else -> "Sensor #$handle"
     }
 

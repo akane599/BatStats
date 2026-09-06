@@ -106,8 +106,9 @@ jobs:
           ./gradlew :app:testDebugUnitTest --stacktrace
 
       - name: Build
+        # No KEYSTORE_PATH: the decode step writes to $GITHUB_WORKSPACE/release.keystore,
+        # which is already where the build script looks by default.
         env:
-          KEYSTORE_PATH: ${{ steps.keystore.outputs.available == 'true' && format('{0}/release.keystore', github.workspace) || '' }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}

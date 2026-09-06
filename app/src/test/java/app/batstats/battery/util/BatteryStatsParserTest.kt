@@ -335,6 +335,39 @@ class BatteryStatsParserTest {
     }
 
     @Test
+    fun `locally resolved names fill the gaps the dump left`() {
+        val dump = """
+            9,0,i,uid,10395,com.from.dump
+            9,10395,l,pwi,uid,22.8,1,0,0
+            9,10616,l,pwi,uid,11.0,1,0,0
+            9,10616,l,wl,SomeLock,0,f,0,0,0,1000,p,1,0,0,0
+        """.trimIndent()
+
+        val asked = mutableListOf<Int>()
+        val resolved = BatteryStatsParser.applyPackageNames(
+            BatteryStatsParser.parseCheckin(dump)
+        ) { uid ->
+            asked += uid
+            if (uid == 10616) "com.from.packagemanager" else null
+        }
+
+        val apps = resolved.apps.associateBy { it.uid }
+        // Names the dump supplied are left alone, and not looked up again.
+        assertEquals("com.from.dump", apps.getValue(10395).packageName)
+        assertEquals("com.from.packagemanager", apps.getValue(10616).packageName)
+        assertEquals("com.from.packagemanager", resolved.wakelocks.single().packageName)
+        assertEquals(listOf(10616), asked)
+    }
+
+    @Test
+    fun `an unresolvable uid keeps its placeholder`() {
+        val resolved = BatteryStatsParser.applyPackageNames(
+            BatteryStatsParser.parseCheckin("9,10395,l,pwi,uid,22.8,1,0,0")
+        ) { null }
+        assertEquals("uid:10395", resolved.apps.single().packageName)
+    }
+
+    @Test
     fun `screen power is read but the unexplained smear column is not`() {
         // Screen plus the process-state figures reconciles with the total on a real device;
         // the next column does not, so it stays out of the model.

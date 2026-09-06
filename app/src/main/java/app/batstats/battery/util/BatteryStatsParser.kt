@@ -998,6 +998,32 @@ object BatteryStatsParser {
         return result
     }
 
+    /**
+     * Fills in package names the dump could not supply.
+     *
+     * [resolve] is asked only about rows still showing the "uid:NNNNN" placeholder, and only
+     * once per uid; returning null leaves the placeholder in place.
+     */
+    fun applyPackageNames(snapshot: FullSnapshot, resolve: (Int) -> String?): FullSnapshot {
+        val looked = HashMap<Int, String?>()
+        fun name(uid: Int, current: String): String {
+            if (current != "uid:$uid") return current
+            return looked.getOrPut(uid) { resolve(uid) } ?: current
+        }
+        return snapshot.copy(
+            apps = snapshot.apps.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            wakelocks = snapshot.wakelocks.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            alarms = snapshot.alarms.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            jobs = snapshot.jobs.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            syncs = snapshot.syncs.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            network = snapshot.network.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            sensors = snapshot.sensors.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            processStats = snapshot.processStats.map {
+                it.copy(packageName = name(it.uid, it.packageName))
+            }
+        )
+    }
+
     /** Folds a [parseEstimatedPowerUse] result onto an already-parsed checkin snapshot. */
     fun applyPowerStates(
         snapshot: FullSnapshot,

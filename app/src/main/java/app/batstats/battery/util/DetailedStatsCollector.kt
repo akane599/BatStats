@@ -37,6 +37,7 @@ class DetailedStatsCollector(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val refreshing = AtomicBoolean(false)
+    private val packageNames = PackageNameResolver(context)
 
     private val _snapshot = MutableStateFlow<BatteryStatsParser.FullSnapshot?>(null)
     val snapshot: StateFlow<BatteryStatsParser.FullSnapshot?> = _snapshot.asStateFlow()
@@ -83,12 +84,16 @@ class DetailedStatsCollector(
                     _mode.value = stats.mode
                     Log.d(TAG, "Parsing batterystats (${stats.output.length} chars, via ${stats.mode})...")
                     val parsed = BatteryStatsParser.parseCheckin(stats.output)
-                    _snapshot.value = parsed
+                    // The dump's own uid -> package map is incomplete whenever the caller
+                    // could not see other packages; fill the gaps locally.
+                    val named = BatteryStatsParser.applyPackageNames(parsed, packageNames::nameFor)
+                    _snapshot.value = named
                     hasData = true
                     Log.d(
                         TAG,
-                        "Parsed ${parsed.apps.size} apps, ${parsed.wakelocks.size} wakelocks, " +
-                            "${parsed.mappedPackages} package names"
+                        "Parsed ${named.apps.size} apps, ${named.wakelocks.size} wakelocks, " +
+                            "${parsed.mappedPackages} names from the dump, " +
+                            "${named.apps.count { it.packageName != "uid:${it.uid}" }} resolved"
                     )
                 }
 

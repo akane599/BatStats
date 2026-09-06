@@ -249,6 +249,42 @@ class BatteryStatsParserTest {
     }
 
     @Test
+    fun `a state with zero power but a real duration is kept`() {
+        // Real rows: a state can be credited no power yet still report time spent there.
+        // Dropping those would silently lose "this app ran, it just cost nothing".
+        val dump = """
+              UID u0a83: 0.0585 fg: 0 (806ms) bg: 0.00845 (7ms) cached: 0.00521 (2m 0s 434ms)
+              UID u0a86: 0.00406 bg: 0.00400 (1m 54s 227ms) fgs: 0.0000620 (6s 2ms) cached: 0 (95ms)
+              UID u0a143: 0.000401 fgs: 0.0000620 (30s 62ms) cached: 0.000339 (8m 6s 497ms)
+        """.trimIndent()
+
+        val byUid = BatteryStatsParser.parseEstimatedPowerUse(dump)
+
+        val zeroFg = byUid.getValue(10083).first { it.state == "fg" }
+        assertEquals(0.0, zeroFg.powerMah, 1e-9)
+        assertEquals(806L, zeroFg.durationMs)
+
+        val zeroCached = byUid.getValue(10086).first { it.state == "cached" }
+        assertEquals(0.0, zeroCached.powerMah, 1e-9)
+        assertEquals(95L, zeroCached.durationMs)
+
+        // A row can start at fgs with no fg or bg at all.
+        assertEquals(listOf("fgs", "cached"), byUid.getValue(10143).map { it.state })
+    }
+
+    @Test
+    fun `fgs is not misread as fg`() {
+        val byUid = BatteryStatsParser.parseEstimatedPowerUse(
+            "  UID u0a616: 5.78 fg: 0.0303 (1m 38s 445ms) bg: 0.000344 (9s 286ms) fgs: 0.0510 (6m 48s 831ms)"
+        )
+        val states = byUid.getValue(10616)
+        assertEquals(listOf("fg", "bg", "fgs"), states.map { it.state })
+        assertEquals(0.0303, states[0].powerMah, 1e-6)
+        assertEquals(0.0510, states[2].powerMah, 1e-6)
+        assertEquals(6 * 60_000L + 48_000L + 831L, states[2].durationMs)
+    }
+
+    @Test
     fun `power states are folded onto the matching app row`() {
         val snapshot = BatteryStatsParser.parseCheckin(
             """

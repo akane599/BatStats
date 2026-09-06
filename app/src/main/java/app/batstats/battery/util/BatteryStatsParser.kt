@@ -938,8 +938,9 @@ object BatteryStatsParser {
         Regex("""^\s*UID\s+(\S+?):\s*([0-9.]+(?:[eE][+-]?\d+)?)\s*(.*)$""")
 
     // Each "<state>: <mAh>" pair, with the duration in brackets when the dump includes one.
+    // "fgs" precedes "fg" so the longer name wins rather than relying on backtracking.
     private val UID_POWER_STATE =
-        Regex("""\b(fg|fgs|bg|cached)\s*:\s*([0-9.]+(?:[eE][+-]?\d+)?)(?:\s*\(([^)]*)\))?""")
+        Regex("""\b(fgs|fg|bg|cached)\s*:\s*([0-9.]+(?:[eE][+-]?\d+)?)(?:\s*\(([^)]*)\))?""")
 
     private val USER_APP_UID = Regex("""^u(\d+)a(\d+)$""")
 

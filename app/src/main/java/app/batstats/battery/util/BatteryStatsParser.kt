@@ -71,7 +71,25 @@ object BatteryStatsParser {
         val audioTimeMs: Long = 0L,
         val videoTimeMs: Long = 0L,
         val bluetoothScanTimeMs: Long = 0L,
-        val bluetoothUnoptimizedScanTimeMs: Long = 0L
+        val bluetoothUnoptimizedScanTimeMs: Long = 0L,
+        /** Filled from the human-readable dump; see [parseEstimatedPowerUse]. */
+        val powerByState: List<UidPowerState> = emptyList()
+    )
+
+    /**
+     * Power attributed to an app while it sat in one process state.
+     *
+     * Android 12 replaced BatterySipper's per-component split (cpu/wifi/gps/...) with
+     * BatteryUsageStats, which attributes an app's drain by process state instead. The
+     * per-component numbers now only exist device-wide, so this is the only per-app
+     * breakdown current releases actually report.
+     */
+    data class UidPowerState(
+        val state: String,
+        val label: String,
+        val powerMah: Double,
+        /** 0 when the dump prints the power without a duration. */
+        val durationMs: Long
     )
 
     data class WakelockStats(
@@ -904,6 +922,100 @@ object BatteryStatsParser {
     private inline fun List<String>.indexOfFrom(start: Int, predicate: (String) -> Boolean): Int {
         for (i in start until size) if (predicate(this[i])) return i
         return -1
+    }
+
+    /**
+     * Shell command that yields the input for [parseEstimatedPowerUse].
+     *
+     * The full `dumpsys batterystats` output is enormous, so the filtering is done on the
+     * device: only the per-UID power lines come back.
+     */
+    const val POWER_USE_COMMAND =
+        "dumpsys batterystats | grep -E '^[[:space:]]*UID ' | head -n 400"
+
+    // "  UID u0a285: 219 fg: 99.9 (22m 19s 961ms) bg: 2.80 (15m 40s 873ms) cached: 42.3 (...)"
+    private val UID_POWER_LINE =
+        Regex("""^\s*UID\s+(\S+?):\s*([0-9.]+(?:[eE][+-]?\d+)?)\s*(.*)$""")
+
+    // Each "<state>: <mAh>" pair, with the duration in brackets when the dump includes one.
+    private val UID_POWER_STATE =
+        Regex("""\b(fg|fgs|bg|cached)\s*:\s*([0-9.]+(?:[eE][+-]?\d+)?)(?:\s*\(([^)]*)\))?""")
+
+    private val USER_APP_UID = Regex("""^u(\d+)a(\d+)$""")
+
+    private val DURATION_PART = Regex("""(\d+)\s*(ms|h|m|s)""")
+
+    private fun stateLabel(state: String): String = when (state) {
+        "fg" -> "Foreground"
+        "fgs" -> "Foreground service"
+        "bg" -> "Background"
+        "cached" -> "Cached"
+        else -> state
+    }
+
+    /**
+     * Parses the per-UID rows of the `Estimated power use (mAh)` section into a
+     * uid -> process-state breakdown.
+     */
+    fun parseEstimatedPowerUse(raw: String): Map<Int, List<UidPowerState>> {
+        val result = LinkedHashMap<Int, List<UidPowerState>>()
+        raw.lineSequence().forEach { line ->
+            val match = UID_POWER_LINE.find(line) ?: return@forEach
+            val uid = parseUidToken(match.groupValues[1]) ?: return@forEach
+            val states = UID_POWER_STATE.findAll(match.groupValues[3])
+                .map { entry ->
+                    val state = entry.groupValues[1]
+                    UidPowerState(
+                        state = state,
+                        label = stateLabel(state),
+                        powerMah = entry.groupValues[2].toDoubleOrNull() ?: 0.0,
+                        durationMs = parseHumanDuration(entry.groupValues[3])
+                    )
+                }
+                .filter { it.powerMah > 0.0 || it.durationMs > 0L }
+                .toList()
+            if (states.isNotEmpty()) result[uid] = states
+        }
+        return result
+    }
+
+    /** Folds a [parseEstimatedPowerUse] result onto an already-parsed checkin snapshot. */
+    fun applyPowerStates(
+        snapshot: FullSnapshot,
+        byUid: Map<Int, List<UidPowerState>>
+    ): FullSnapshot {
+        if (byUid.isEmpty()) return snapshot
+        return snapshot.copy(
+            apps = snapshot.apps.map { app ->
+                byUid[app.uid]?.let { app.copy(powerByState = it) } ?: app
+            }
+        )
+    }
+
+    /** "u0a285" -> 10285, "1000" -> 1000. */
+    private fun parseUidToken(token: String): Int? {
+        token.toIntOrNull()?.let { return it }
+        val match = USER_APP_UID.matchEntire(token) ?: return null
+        val user = match.groupValues[1].toIntOrNull() ?: return null
+        val appId = match.groupValues[2].toIntOrNull() ?: return null
+        return user * 100_000 + 10_000 + appId
+    }
+
+    /** "4h 0m 31s 150ms" -> 14431150. Returns 0 for an empty or unrecognised string. */
+    private fun parseHumanDuration(text: String): Long {
+        if (text.isBlank()) return 0L
+        var total = 0L
+        DURATION_PART.findAll(text).forEach { part ->
+            val value = part.groupValues[1].toLongOrNull() ?: return@forEach
+            total += when (part.groupValues[2]) {
+                "ms" -> value
+                "s" -> value * 1_000L
+                "m" -> value * 60_000L
+                "h" -> value * 3_600_000L
+                else -> 0L
+            }
+        }
+        return total
     }
 
     data class DeviceIdleInfo(

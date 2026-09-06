@@ -205,6 +205,77 @@ class BatteryStatsParserTest {
     }
 
     @Test
+    fun `estimated power use rows are parsed into per-state power`() {
+        // Verbatim rows from a device, including the variants that trip up a naive regex:
+        // a system uid with no duration, a state with power but no bracketed duration,
+        // and values small enough to need more than two decimals.
+        val dump = """
+              Estimated power use (mAh):
+              UID u0a285: 219 fg: 99.9 (22m 19s 961ms) bg: 2.80 (15m 40s 873ms) cached: 42.3 (4h 0m 31s 150ms)
+              UID u0a479: 109 fg: 48.8 (12m 58s 247ms) bg: 16.7 (24m 12s 545ms) fgs: 25.1 (6m 36s 85ms) cached: 13.1 (3h 26m 4s 105ms)
+              UID 1000: 87.4 bg: 87.4
+              UID u0a432: 25.6 fg: 2.60 (6m 14s 125ms) bg: 0.544 fgs: 1.44 (2h 52m 7s 789ms) cached: 0.226 (19s 299ms)
+              UID u0a528: 8.11 fg: 0.140 (2m 15s 35ms) bg: 0.139 (1s 415ms) fgs: 0.0000790 (2s 585ms) cached: 0.290 (3h 28m 19s 275ms)
+              UID 0: 33.3 bg: 33.3
+        """.trimIndent()
+
+        val byUid = BatteryStatsParser.parseEstimatedPowerUse(dump)
+
+        // u0a285 -> 10000 + 285
+        val app = byUid.getValue(10285)
+        assertEquals(listOf("fg", "bg", "cached"), app.map { it.state })
+        assertEquals(99.9, app[0].powerMah, 0.001)
+        assertEquals(22 * 60_000L + 19_000L + 961L, app[0].durationMs)
+        assertEquals("Foreground", app[0].label)
+        assertEquals(4 * 3_600_000L + 31_000L + 150L, app[2].durationMs)
+
+        // Plain numeric uids stay as they are.
+        val system = byUid.getValue(1000)
+        assertEquals(1, system.size)
+        assertEquals(87.4, system[0].powerMah, 0.001)
+        assertEquals(0L, system[0].durationMs)   // no bracketed duration on this row
+        assertTrue(byUid.containsKey(0))
+
+        // A state can carry power without a duration mid-line.
+        val mixed = byUid.getValue(10432)
+        assertEquals(listOf("fg", "bg", "fgs", "cached"), mixed.map { it.state })
+        assertEquals(0.544, mixed[1].powerMah, 0.0001)
+        assertEquals(0L, mixed[1].durationMs)
+
+        // Very small values must survive parsing.
+        val tiny = byUid.getValue(10528).first { it.state == "fgs" }
+        assertEquals(0.0000790, tiny.powerMah, 1e-9)
+        assertEquals(2_585L, tiny.durationMs)
+    }
+
+    @Test
+    fun `power states are folded onto the matching app row`() {
+        val snapshot = BatteryStatsParser.parseCheckin(
+            """
+            9,0,i,uid,10285,com.example.app
+            9,0,i,uid,10999,com.example.other
+            9,10285,l,pwi,uid,219,1,0,0
+            9,10999,l,pwi,uid,5,1,0,0
+            """.trimIndent()
+        )
+        val byUid = BatteryStatsParser.parseEstimatedPowerUse(
+            "  UID u0a285: 219 fg: 99.9 (22m 19s 961ms) bg: 2.80 (15m 40s 873ms)"
+        )
+
+        val apps = BatteryStatsParser.applyPowerStates(snapshot, byUid).apps
+            .associateBy { it.packageName }
+        assertEquals(2, apps.getValue("com.example.app").powerByState.size)
+        assertTrue(apps.getValue("com.example.other").powerByState.isEmpty())
+    }
+
+    @Test
+    fun `unparseable power-use text yields nothing rather than bad rows`() {
+        assertTrue(BatteryStatsParser.parseEstimatedPowerUse("").isEmpty())
+        assertTrue(BatteryStatsParser.parseEstimatedPowerUse("Wake locks: size=3").isEmpty())
+        assertTrue(BatteryStatsParser.parseEstimatedPowerUse("  UID u0a1: 5").isEmpty())
+    }
+
+    @Test
     fun `apps with no detail lines keep zeroed counters`() {
         val dump = """
             9,0,i,uid,10123,com.example.app

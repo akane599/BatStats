@@ -95,6 +95,24 @@ class DetailedStatsCollector(
                 }
             }
 
+            // Per-app power split by process state. Current Android reports this only in
+            // the human-readable dump - the checkin format carries a per-app total and no
+            // breakdown at all - so it takes a second, filtered pass.
+            if (_snapshot.value != null) {
+                when (val power = shellRunner.exec(BatteryStatsParser.POWER_USE_COMMAND)) {
+                    is ShellRunner.Outcome.Success -> {
+                        val byUid = BatteryStatsParser.parseEstimatedPowerUse(power.output)
+                        Log.d(TAG, "Power-use breakdown for ${byUid.size} uids")
+                        _snapshot.value = _snapshot.value?.let {
+                            BatteryStatsParser.applyPowerStates(it, byUid)
+                        }
+                    }
+
+                    is ShellRunner.Outcome.Failure ->
+                        Log.w(TAG, "power-use dump failed: ${power.message}")
+                }
+            }
+
             // Device idle info.
             when (val idle = shellRunner.exec("dumpsys deviceidle")) {
                 is ShellRunner.Outcome.Success -> {

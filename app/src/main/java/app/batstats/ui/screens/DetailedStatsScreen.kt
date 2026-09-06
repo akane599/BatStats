@@ -843,13 +843,20 @@ private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats) {
                     ).filter { it.second > 0L }
 
                     Text("Power Breakdown", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    StatRow("Total", String.format(Locale.getDefault(), "%.2f mAh", app.powerMah))
-                    powerRows.forEach { (label, mah) ->
-                        StatRow(label, String.format(Locale.getDefault(), "%.2f mAh", mah))
+                    StatRow("Total", formatMah(app.powerMah))
+                    // Android attributes an app's drain by process state, not by component.
+                    app.powerByState.forEach { state ->
+                        val value = if (state.durationMs > 0L) {
+                            "${formatMah(state.powerMah)} · ${formatDuration(state.durationMs)}"
+                        } else {
+                            formatMah(state.powerMah)
+                        }
+                        StatRow(state.label, value)
                     }
-                    if (powerRows.isEmpty()) {
+                    powerRows.forEach { (label, mah) -> StatRow(label, formatMah(mah)) }
+                    if (powerRows.isEmpty() && app.powerByState.isEmpty()) {
                         Text(
-                            "No per-component split reported for this app.",
+                            "No breakdown reported for this app.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1878,6 +1885,17 @@ private fun EmptyListMessage(message: String) {
     ) {
         Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+/**
+ * Per-state figures span several orders of magnitude (219 mAh down to 0.000079 mAh),
+ * so a fixed two decimals would render most of the small ones as a misleading "0.00".
+ */
+private fun formatMah(mah: Double): String = when {
+    mah <= 0.0 -> "0 mAh"
+    mah >= 10 -> String.format(Locale.getDefault(), "%.1f mAh", mah)
+    mah >= 0.01 -> String.format(Locale.getDefault(), "%.2f mAh", mah)
+    else -> String.format(Locale.getDefault(), "%.4f mAh", mah)
 }
 
 private fun formatDuration(ms: Long): String {

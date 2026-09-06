@@ -62,13 +62,17 @@ android {
 
     // Release signing is opt-in: with no keystore (a fork, or CI without secrets) the
     // release variant still builds, it just comes out unsigned instead of failing.
+    // A variable that is *set but empty* reads back as "" rather than null, and file("")
+    // throws, so treat blank the same as unset.
+    fun signingEnv(name: String): String? =
+        providers.environmentVariable(name).orNull?.takeIf { it.isNotBlank() }
+
     val keystoreFile = file(
-        providers.environmentVariable("KEYSTORE_PATH").orNull
-            ?: "${rootProject.projectDir}/release.keystore"
+        signingEnv("KEYSTORE_PATH") ?: "${rootProject.projectDir}/release.keystore"
     )
-    val storePasswordEnv = providers.environmentVariable("STORE_PASSWORD").orNull
-    val keyAliasEnv = providers.environmentVariable("KEY_ALIAS").orNull
-    val keyPasswordEnv = providers.environmentVariable("KEY_PASSWORD").orNull
+    val storePasswordEnv = signingEnv("STORE_PASSWORD")
+    val keyAliasEnv = signingEnv("KEY_ALIAS")
+    val keyPasswordEnv = signingEnv("KEY_PASSWORD")
     val hasReleaseKeystore = keystoreFile.exists() &&
         !storePasswordEnv.isNullOrBlank() &&
         !keyAliasEnv.isNullOrBlank()

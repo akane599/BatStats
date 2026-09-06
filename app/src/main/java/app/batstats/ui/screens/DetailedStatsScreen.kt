@@ -819,8 +819,7 @@ private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats) {
                         "GPS" to app.gpsPowerMah,
                         "Sensors" to app.sensorPowerMah,
                         "Camera" to app.cameraPowerMah,
-                        "Bluetooth" to app.bluetoothPowerMah,
-                        "Proportional smear" to app.proportionalSmearMah
+                        "Bluetooth" to app.bluetoothPowerMah
                     ).filter { it.second > 0.0 }
 
                     val timeRows = listOf(

@@ -417,6 +417,11 @@ object BatteryStatsParser {
             }
             .sortedByDescending { it.totalTimeMs }
 
+        // Package names are resolved here rather than while parsing: the uid -> package
+        // lines are not guaranteed to precede the rows that reference them, and a row read
+        // before the mapping arrived would keep a "uid:NNNNN" placeholder for good.
+        fun named(uid: Int) = uidToPkg[uid] ?: "uid:$uid"
+
         return FullSnapshot(
             capturedAt = System.currentTimeMillis(),
             batteryRealtimeMs = batteryRealtimeMs,
@@ -426,8 +431,8 @@ object BatteryStatsParser {
             estimatedCapacityMah = estCapacity,
             apps = joinPerUidDetail(
                 appStats.values, mergedWakelocks, mergedNetwork, mergedSensors, uidTimes
-            ),
-            wakelocks = mergedWakelocks,
+            ).map { it.copy(packageName = named(it.uid)) },
+            wakelocks = mergedWakelocks.map { it.copy(packageName = named(it.uid)) },
             kernelWakelocks = kernelWakelocks
                 .mergeBy({ it.name }) { a, b ->
                     a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
@@ -441,19 +446,22 @@ object BatteryStatsParser {
                         totalTimeMs = a.totalTimeMs + b.totalTimeMs
                     )
                 }
-                .sortedByDescending { it.count },
+                .sortedByDescending { it.count }
+                .map { it.copy(packageName = named(it.uid)) },
             jobs = jobs
                 .mergeBy({ it.uid to it.jobName }) { a, b ->
                     a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
                 }
-                .sortedByDescending { it.totalTimeMs },
+                .sortedByDescending { it.totalTimeMs }
+                .map { it.copy(packageName = named(it.uid)) },
             syncs = syncs
                 .mergeBy({ it.uid to it.authority }) { a, b ->
                     a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
                 }
-                .sortedByDescending { it.totalTimeMs },
-            network = mergedNetwork,
-            sensors = mergedSensors,
+                .sortedByDescending { it.totalTimeMs }
+                .map { it.copy(packageName = named(it.uid)) },
+            network = mergedNetwork.map { it.copy(packageName = named(it.uid)) },
+            sensors = mergedSensors.map { it.copy(packageName = named(it.uid)) },
             signalStrength = signalStrength,
             wifiSignal = wifiSignal,
             bluetooth = bluetooth,
@@ -469,6 +477,7 @@ object BatteryStatsParser {
                     )
                 }
                 .sortedByDescending { it.userTimeMs + it.systemTimeMs }
+                .map { it.copy(packageName = named(it.uid)) }
         )
     }
 
@@ -578,13 +587,15 @@ object BatteryStatsParser {
         // (scrn, cpu, cell, gnss, ...) reported against uid 0.
         if (type == "uid") {
             val pkg = uidToPkg[uid] ?: "uid:$uid"
+            // Column 7 is the screen share, and it checks out: screen plus the process-state
+            // figures sums to the total. Column 8 does not - on a real device it came back
+            // larger than the app's own total - so it is left alone until it can be
+            // explained rather than surfaced as a number nobody can act on.
             val screen = parts.getOrNull(7)?.toDoubleOrNull() ?: 0.0
-            val smear = parts.getOrNull(8)?.toDoubleOrNull() ?: 0.0
             val existing = appStats[uid] ?: AppPowerStats(uid = uid, packageName = pkg, powerMah = 0.0)
             appStats[uid] = existing.copy(
                 powerMah = existing.powerMah + mah,
-                screenPowerMah = existing.screenPowerMah + screen,
-                proportionalSmearMah = existing.proportionalSmearMah + smear
+                screenPowerMah = existing.screenPowerMah + screen
             )
         }
     }

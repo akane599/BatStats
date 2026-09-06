@@ -312,6 +312,44 @@ class BatteryStatsParserTest {
     }
 
     @Test
+    fun `package names resolve even when the uid mapping comes last`() {
+        // The uid -> package lines are not guaranteed to precede the rows that use them.
+        // Resolving during the parse left those rows stuck on a "uid:NNNNN" placeholder.
+        val dump = """
+            9,10395,l,pwi,uid,22.8,1,20.6,0
+            9,10395,l,wl,SomeLock,0,f,0,0,0,1000,p,1,0,0,0
+            9,10395,l,nt,10,20,30,40,0,0,0,0,0,0,0,0
+            9,0,i,uid,10395,com.example.late
+        """.trimIndent()
+
+        val snapshot = BatteryStatsParser.parseCheckin(dump)
+        assertEquals("com.example.late", snapshot.apps.single().packageName)
+        assertEquals("com.example.late", snapshot.wakelocks.single().packageName)
+        assertEquals("com.example.late", snapshot.network.single().packageName)
+    }
+
+    @Test
+    fun `unmapped uids keep a readable placeholder`() {
+        val snapshot = BatteryStatsParser.parseCheckin("9,10395,l,pwi,uid,22.8,1,0,0")
+        assertEquals("uid:10395", snapshot.apps.single().packageName)
+    }
+
+    @Test
+    fun `screen power is read but the unexplained smear column is not`() {
+        // Screen plus the process-state figures reconciles with the total on a real device;
+        // the next column does not, so it stays out of the model.
+        val dump = """
+            9,0,i,uid,10395,com.example.app
+            9,10395,l,pwi,uid,22.8,1,20.6,26.3
+        """.trimIndent()
+
+        val app = BatteryStatsParser.parseCheckin(dump).apps.single()
+        assertEquals(22.8, app.powerMah, 0.001)
+        assertEquals(20.6, app.screenPowerMah, 0.001)
+        assertEquals(0.0, app.proportionalSmearMah, 0.001)
+    }
+
+    @Test
     fun `apps with no detail lines keep zeroed counters`() {
         val dump = """
             9,0,i,uid,10123,com.example.app

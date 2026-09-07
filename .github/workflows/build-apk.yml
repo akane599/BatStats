@@ -150,11 +150,18 @@ jobs:
             for apk in "$dir"/batstats-*.apk; do
               [ -e "$apk" ] || continue
               signed='No (unsigned; sign before installing)'
-              if "$apksigner" verify "$apk" >/dev/null 2>&1; then signed='Yes'; fi
+              if "$apksigner" verify "$apk" >/dev/null 2>&1; then
+                signed='Yes'
+              elif [ '${{ steps.params.outputs.build_type }}' = debug ]; then
+                echo "::error::Debug APK failed signature verification: $apk" >&2
+                exit 1
+              fi
               printf '| %s | %s | %s |\n' "$(basename "$apk")" "$(du -h "$apk" | cut -f1)" "$signed"
               (cd "$dir" && sha256sum "$(basename "$apk")") >> "$dir/SHA256SUMS"
             done
           } >> "$GITHUB_STEP_SUMMARY"
+          # A checksum file alone must not count as a successfully produced APK artifact.
+          test -s "$dir/SHA256SUMS"
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4

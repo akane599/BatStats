@@ -9,6 +9,7 @@ import app.batstats.battery.drain.AdvancedDrainTracker
 import app.batstats.battery.drain.DrainNotificationManager
 import app.batstats.battery.shizuku.BstatsCollector
 import app.batstats.battery.shizuku.ShizukuBridge
+import app.batstats.battery.util.CheckinSource
 import app.batstats.battery.util.DetailedStatsCollector
 import app.batstats.battery.util.ShellRunner
 import app.batstats.insights.ForegroundDrainTracker
@@ -46,7 +47,9 @@ val appModule = module {
 
     single { ShizukuBridge(androidContext()) }
     single { ShellRunner(androidContext(), get()) }
-    single { DetailedStatsCollector(get(), get(), androidContext(), get()) }
+    // One shared checkin dump: both collectors read it rather than each running their own.
+    single { CheckinSource(get()) }
+    single { DetailedStatsCollector(get(), get(), androidContext(), get(), get()) }
     single { BstatsCollector(get<BatteryDatabase>().appEnergyDao(), get(), get()) }
 
     single<SettingsRepository<AppSettings>> {

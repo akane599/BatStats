@@ -2,6 +2,7 @@ package app.batstats.battery.shizuku
 
 import android.util.Log
 import app.batstats.battery.data.db.AppEnergyDao
+import app.batstats.battery.util.CheckinSource
 import app.batstats.battery.util.ShellRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,7 +16,7 @@ import kotlin.math.max
 
 class BstatsCollector(
     private val dao: AppEnergyDao,
-    private val shellRunner: ShellRunner,
+    private val checkinSource: CheckinSource,
     // backward compat
     private val shizuku: ShizukuBridge? = null
 ) {
@@ -35,8 +36,10 @@ class BstatsCollector(
         job = scope.launch {
             while (isActive) {
                 try {
-                    val result = shellRunner.run("dumpsys batterystats --checkin")
-                    if (result == null) {
+                    // Shared with the Detailed Stats screen: whichever asks first pays for
+                    // the dump, the other reads the same copy.
+                    val result = checkinSource.get(maxAgeMs = pollSec * 1000L / 2)
+                    if (result !is ShellRunner.Outcome.Success) {
                         Log.w(TAG, "No privileged access for batterystats --checkin")
                         delay(5_000)
                         continue

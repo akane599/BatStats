@@ -25,6 +25,7 @@ class DetailedStatsCollector(
     private val shellRunner: ShellRunner,
     private val db: BatteryDatabase,
     private val context: Context,
+    private val checkinSource: CheckinSource,
     // NOTE: only for direct checks (if later used)
     private val shizuku: ShizukuBridge? = null
 ) {
@@ -77,9 +78,10 @@ class DetailedStatsCollector(
             var hasData = false
             var firstFailure: String? = null
 
-            // Battery stats - the one that actually matters.
+            // Battery stats - the one that actually matters. Shared with the background
+            // per-app poller so the dump is produced once, not once per collector.
             Log.d(TAG, "Fetching batterystats...")
-            when (val stats = shellRunner.exec("dumpsys batterystats --checkin")) {
+            when (val stats = checkinSource.get()) {
                 is ShellRunner.Outcome.Success -> {
                     _mode.value = stats.mode
                     Log.d(TAG, "Parsing batterystats (${stats.output.length} chars, via ${stats.mode})...")
@@ -178,6 +180,9 @@ class DetailedStatsCollector(
     suspend fun resetStats(): Boolean {
         // A successful reset prints nothing at all, so an empty result is a success here.
         val outcome = shellRunner.exec("dumpsys batterystats --reset", allowEmpty = true)
+        // Every cached counter just went to zero; serving the pre-reset dump would make the
+        // reset look as though it had not worked.
+        checkinSource.invalidate()
         return outcome is ShellRunner.Outcome.Success
     }
 

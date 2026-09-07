@@ -27,27 +27,42 @@ class ForegroundDrainTracker(
     private val running = AtomicBoolean(false)
     private var job: Job? = null
 
+    /** Measured separately per screen state: the two idle draws are nothing alike. */
+    private val screenOnBaseline = IdleBaseline()
+    private val screenOffBaseline = IdleBaseline()
+
     fun start() {
         if (!running.compareAndSet(false, true)) return
         job = scope.launch {
             var lastTs = System.currentTimeMillis()
             var lastPkg: String? = null
 
-            batteryRepo.startSampling() // ensure sampling is on (idempotent)
             batteryRepo.realtimeFlow.collect { rt ->
                 val now = rt.sample?.timestamp ?: System.currentTimeMillis()
-                val dtHours = max(0.0, (now - lastTs) / 3_600_000.0)
+                // Cap the interval: if the flow stalls - doze, a killed process - we have no
+                // reason to believe one app held the foreground for the whole gap, and
+                // uncapped this would attribute hours of drain to it on a single reading.
+                val dtHours = ((now - lastTs).coerceIn(0L, MAX_ATTRIBUTED_GAP_MS)) / 3_600_000.0
 
                 val pkg = currentForegroundPackage() ?: lastPkg
-                if (pkg != null && dtHours > 0.0) {
-                    // Heuristic "excess" over a coarse baseline
+
+                // Only discharge is attributable. The current is positive on the charger, so
+                // taking its magnitude used to credit a fast charge to whatever app happened
+                // to be open - 1500 mA of charging read as 1420 mA of "excess app drain".
+                val discharging = rt.plugged == 0 && rt.currentMa < 0
+                if (discharging) {
+                    val screenOn = rt.sample?.screenOn == true
                     val ma = abs(rt.currentMa.toDouble())
-                    val baseline = baselineMilliAmps(screenOn = rt.sample?.screenOn == true)
-                    val deltaMa = max(0.0, ma - baseline)
-                    val deltaMah = deltaMa * dtHours
-                    val samples = 1
-                    appEnergyDao.incrementHour(pkg, now, deltaMah, samples)
+                    val baselines = if (screenOn) screenOnBaseline else screenOffBaseline
+                    baselines.observe(ma)
+
+                    val baseline = baselines.baselineMilliAmps()
+                    if (pkg != null && dtHours > 0.0 && baseline != null) {
+                        val deltaMah = max(0.0, ma - baseline) * dtHours
+                        appEnergyDao.incrementHour(pkg, now, deltaMah, addSamples = 1)
+                    }
                 }
+
                 lastPkg = pkg
                 lastTs = now
             }
@@ -115,6 +130,8 @@ class ForegroundDrainTracker(
         return lastPkg
     }
 
-    private fun baselineMilliAmps(screenOn: Boolean): Double =
-        if (screenOn) 80.0 else 20.0
+    companion object {
+        /** Beyond this, "the foreground app was responsible" stops being a fair assumption. */
+        private const val MAX_ATTRIBUTED_GAP_MS = 5 * 60_000L
+    }
 }

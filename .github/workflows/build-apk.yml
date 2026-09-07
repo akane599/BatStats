@@ -67,12 +67,19 @@ jobs:
         env:
           BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
           ABI: ${{ inputs.abi || 'arm64-v8a' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           # Capitalise for the Gradle task name: assembleDebug / assembleRelease.
           task="assemble$(printf '%s' "${BUILD_TYPE:0:1}" | tr '[:lower:]' '[:upper:]')${BUILD_TYPE:1}"
           echo "task=$task" >> "$GITHUB_OUTPUT"
           echo "build_type=$BUILD_TYPE" >> "$GITHUB_OUTPUT"
+
+          # On a pull_request event github.sha is the *merge* commit GitHub built, not the
+          # commit that was pushed, so artifacts were named after a SHA that appears nowhere
+          # in the branch. Prefer the head SHA, and shorten it to something readable.
+          sha="${HEAD_SHA:-$GITHUB_SHA}"
+          echo "sha=${sha:0:8}" >> "$GITHUB_OUTPUT"
 
           # "all" keeps the project defaults (every split plus universal). A single ABI keeps
           # CI fast; "universal" turns splitting off and builds one fat APK.
@@ -128,7 +135,7 @@ jobs:
           {
             echo "### APKs"
             echo
-            echo "Variant: \`${{ steps.params.outputs.build_type }}\` · Signed: \`${{ steps.keystore.outputs.available }}\`"
+            echo "Variant: \`${{ steps.params.outputs.build_type }}\` · Commit: \`${{ steps.params.outputs.sha }}\` · Signed: \`${{ steps.keystore.outputs.available }}\`"
             echo
             echo '| File | Size |'
             echo '| --- | --- |'
@@ -142,7 +149,7 @@ jobs:
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: batstats-${{ steps.params.outputs.build_type }}-${{ github.sha }}
+          name: batstats-${{ steps.params.outputs.build_type }}-${{ steps.params.outputs.sha }}
           path: app/build/outputs/apk/${{ steps.params.outputs.build_type }}/batstats-*.apk
           if-no-files-found: error
           retention-days: 30

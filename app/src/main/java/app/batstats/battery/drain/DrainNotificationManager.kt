@@ -35,19 +35,18 @@ class DrainNotificationManager(
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Drain Statistics",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows real-time battery drain statistics"
-                setShowBadge(false)
-                enableLights(false)
-                enableVibration(false)
-            }
-            notificationManager.createNotificationChannel(channel)
+        // Channels have existed since O and minSdk is 26, so this is unconditional.
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Drain Statistics",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Shows real-time battery drain statistics"
+            setShowBadge(false)
+            enableLights(false)
+            enableVibration(false)
         }
+        notificationManager.createNotificationChannel(channel)
     }
 
     fun startNotification() {
@@ -103,26 +102,31 @@ class DrainNotificationManager(
 
         val title = "${state.batteryLevel}% • $currentStateText"
         
+        // Rates read as a share of the battery per hour; on a device whose capacity we
+        // could not establish these fall back to mA rather than inventing a percentage.
+        val cap = state.capacityMah
+        fun rate(value: Double) = formatDrainRatePreferPercent(value, cap)
+
         val contentText = buildString {
-            append("On: ${formatDrainRate(state.screenOnDrainRate)}")
-            append(" • Off: ${formatDrainRate(state.screenOffDrainRate)}")
-            append(" • Sleep: ${formatDrainRate(state.deepSleepDrainRate)}")
+            append("On: ${rate(state.screenOnDrainRate)}")
+            append(" • Off: ${rate(state.screenOffDrainRate)}")
+            append(" • Sleep: ${rate(state.deepSleepDrainRate)}")
         }
 
         val bigText = buildString {
             appendLine("━━━ Drain Rates ━━━")
-            appendLine("📱 Screen On: ${formatDrainRate(state.screenOnDrainRate)} (${formatDuration(state.screenOnTimeMs)})")
-            appendLine("🌙 Screen Off: ${formatDrainRate(state.screenOffDrainRate)} (${formatDuration(state.screenOffTimeMs)})")
-            appendLine("😴 Deep Sleep: ${formatDrainRate(state.deepSleepDrainRate)} (${formatDuration(state.deepSleepTimeMs)}) [${String.format(Locale.getDefault(), "%.0f%%", state.deepSleepPercentage)}]")
-            appendLine("⚡ Awake: ${formatDrainRate(state.awakeDrainRate)} (${formatDuration(state.awakeTimeMs)})")
+            appendLine("📱 Screen On: ${rate(state.screenOnDrainRate)} (${formatDuration(state.screenOnTimeMs)})")
+            appendLine("🌙 Screen Off: ${rate(state.screenOffDrainRate)} (${formatDuration(state.screenOffTimeMs)})")
+            appendLine("😴 Deep Sleep: ${rate(state.deepSleepDrainRate)} (${formatDuration(state.deepSleepTimeMs)}) [${String.format(Locale.getDefault(), "%.0f%%", state.deepSleepPercentage)}]")
+            appendLine("⚡ Awake: ${rate(state.awakeDrainRate)} (${formatDuration(state.awakeTimeMs)})")
             appendLine()
             appendLine("━━━ Activity ━━━")
-            appendLine("🔥 Active: ${formatDrainRate(state.activeDrainRate)} (${formatDuration(state.activeTimeMs)})")
-            appendLine("💤 Idle: ${formatDrainRate(state.idleDrainRate)} (${formatDuration(state.idleTimeMs)})")
+            appendLine("🔥 Active: ${rate(state.activeDrainRate)} (${formatDuration(state.activeTimeMs)})")
+            appendLine("💤 Idle: ${rate(state.idleDrainRate)} (${formatDuration(state.idleTimeMs)})")
             appendLine()
             appendLine("━━━ Session ━━━")
-            appendLine("Total: ${String.format(Locale.getDefault(), "%.1f mAh", state.totalDrainMah)} in ${formatDuration(state.totalTimeMs)}")
-            append("Average: ${formatDrainRate(state.averageDrainRate)}")
+            appendLine("Total: ${formatMahWithPercent(state.totalDrainMah, cap)} in ${formatDuration(state.totalTimeMs)}")
+            append("Average: ${rate(state.averageDrainRate)}")
         }
 
         return NotificationCompat.Builder(context, CHANNEL_ID)

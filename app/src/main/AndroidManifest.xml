@@ -12,6 +12,14 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23"/>
+    <!--
+        Battery stats are reported per uid. Turning those uids back into package names is
+        the whole point of the per-app screens, and from API 30 that needs full package
+        visibility - otherwise every row reads "uid:10395". Nothing is transmitted; the
+        lookup is local and read-only.
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <application
         android:name=".battery.BatteryApp"

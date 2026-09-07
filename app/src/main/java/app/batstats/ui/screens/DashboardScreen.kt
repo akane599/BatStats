@@ -16,7 +16,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -87,6 +86,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
@@ -95,16 +96,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.batstats.R
 import app.batstats.battery.data.BatteryRepository
 import app.batstats.battery.data.db.ChargeSession
 import app.batstats.battery.data.db.SessionType
 import app.batstats.battery.util.TimeEstimator
 import app.batstats.viewmodel.DashboardViewModel
-import org.koin.androidx.compose.koinViewModel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -135,7 +137,7 @@ fun DashboardScreen(
                 title = {
                     Column {
                         Text(
-                            "BatStats",
+                            stringResource(R.string.batstats),
                             style = MaterialTheme.typography.headlineMedium
                         )
                         AnimatedVisibility(visible = rt.sample != null) {
@@ -146,7 +148,7 @@ fun DashboardScreen(
                                     .format(timeFormatter)
                             }
                             Text(
-                                "Updated $formatted",
+                                stringResource(R.string.updated, formatted),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -155,22 +157,22 @@ fun DashboardScreen(
                 },
                 actions = {
                     IconButton(onClick = onOpenHistory) {
-                        Icon(Icons.Outlined.History, "History")
+                        Icon(Icons.Outlined.History, stringResource(R.string.history))
                     }
                     IconButton(onClick = onOpenAlarms) {
-                        Icon(Icons.Outlined.Notifications, "Alarms")
+                        Icon(Icons.Outlined.Notifications, stringResource(R.string.alarms))
                     }
                     IconButton(onClick = onOpenData) {
-                        Icon(Icons.Outlined.CloudDownload, "Data")
+                        Icon(Icons.Outlined.CloudDownload, stringResource(R.string.data_export_import))
                     }
                     IconButton(onClick = onOpenDrainStats) {
-                        Icon(Icons.AutoMirrored.Outlined.ShowChart, "Drain Stats")
+                        Icon(Icons.AutoMirrored.Outlined.ShowChart, stringResource(R.string.drain_statistics))
                     }
                     IconButton(onClick = onOpenDetailedStats) {
-                        Icon(Icons.Outlined.Analytics, "Detailed Stats")
+                        Icon(Icons.Outlined.Analytics, stringResource(R.string.detailed_stats))
                     }
                     IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, "Settings")
+                        Icon(Icons.Outlined.Settings, stringResource(R.string.settings))
                     }
                 },
                 scrollBehavior = scrollBehavior
@@ -390,7 +392,7 @@ private fun CircularBatteryIndicator(
 
             Icon(
                 imageVector = Icons.Default.OfflineBolt,
-                contentDescription = "Charging",
+                contentDescription = stringResource(R.string.charging),
                 modifier = Modifier
                     .size(32.dp)
                     .align(Alignment.TopEnd)
@@ -425,9 +427,12 @@ private fun ControlCenter(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("Monitoring", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.monitoring), style = MaterialTheme.typography.titleMedium)
                     Text(
-                        if (isMonitoring) "Running (foreground)" else "Stopped",
+                        stringResource(
+                            if (isMonitoring) R.string.monitoring_running
+                            else R.string.monitoring_stopped
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isMonitoring) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant
@@ -449,7 +454,7 @@ private fun ControlCenter(
                         Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text(if (isMonitoring) "Stop" else "Start")
+                    Text(stringResource(if (isMonitoring) R.string.stop else R.string.start))
                 }
             }
 
@@ -465,7 +470,7 @@ private fun ControlCenter(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Session tracking",
+                        stringResource(R.string.session_tracking),
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -474,14 +479,14 @@ private fun ControlCenter(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             AssistChip(
                                 onClick = { onStartSession(SessionType.CHARGE) },
-                                label = { Text("Charge") },
+                                label = { Text(stringResource(R.string.charge)) },
                                 leadingIcon = {
                                     Icon(Icons.Default.BatteryChargingFull, null, Modifier.size(16.dp))
                                 }
                             )
                             AssistChip(
                                 onClick = { onStartSession(SessionType.DISCHARGE) },
-                                label = { Text("Discharge") },
+                                label = { Text(stringResource(R.string.discharge)) },
                                 leadingIcon = {
                                     Icon(Icons.Default.Battery0Bar, null, Modifier.size(16.dp))
                                 }
@@ -491,7 +496,7 @@ private fun ControlCenter(
                         TextButton(onClick = onEndSession) {
                             Icon(Icons.Default.CheckCircle, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("End")
+                            Text(stringResource(R.string.end))
                         }
                     }
                 }
@@ -509,7 +514,21 @@ private fun ControlCenter(
 
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "${session.type} session active • started $startedAt",
+                        text = buildString {
+                            append(
+                                stringResource(
+                                    R.string.session_active,
+                                    session.type.toString(),
+                                    startedAt
+                                )
+                            )
+                            // Sessions now open and close with the charger, so say which
+                            // ones appeared on their own rather than leaving it a mystery.
+                            if (session.autoStarted) {
+                                append(" • ")
+                                append(stringResource(R.string.session_tracked_automatically))
+                            }
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -3,8 +3,9 @@ package app.batstats.battery.drain
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
@@ -19,13 +20,18 @@ class DrainNotificationReceiver : BroadcastReceiver(), KoinComponent {
 
     private val drainTracker: AdvancedDrainTracker by inject()
 
-    @OptIn(DelicateCoroutinesApi::class)
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-            ACTION_RESET -> {
-                GlobalScope.launch {
-                    drainTracker.resetSession()
-                }
+        if (intent.action != ACTION_RESET) return
+
+        // The process becomes killable the moment onReceive returns, so work launched into
+        // a free-floating scope could be torn down before it ran - tapping Reset would
+        // simply do nothing. goAsync keeps the receiver alive until the reset has happened.
+        val pending = goAsync()
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            try {
+                drainTracker.resetSession()
+            } finally {
+                pending.finish()
             }
         }
     }

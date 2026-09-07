@@ -4,14 +4,15 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.batstats.battery.shizuku.ShizukuBridge
+import app.batstats.battery.util.BatteryCapacity
 import app.batstats.battery.util.DetailedStatsCollector
 import app.batstats.battery.util.PrivilegeChecker
 import app.batstats.battery.util.RootStatsCollector
 import app.batstats.battery.util.ShellRunner
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class DetailedStatsViewModel(
@@ -53,21 +54,34 @@ class DetailedStatsViewModel(
     private val _kernelBattery = MutableStateFlow<RootStatsCollector.KernelBatteryInfo?>(null)
     val kernelBattery: StateFlow<RootStatsCollector.KernelBatteryInfo?> = _kernelBattery.asStateFlow()
 
+    /** Full battery capacity, or 0 when unknown - percentages are then not shown. */
+    private val _capacityMah = MutableStateFlow(0.0)
+    val capacityMah: StateFlow<Double> = _capacityMah.asStateFlow()
+
+    private var refreshJob: Job? = null
+
     init {
+        // Seed from the bridge first: these are StateFlows, so their initial emission would
+        // otherwise look like a permission that just landed and kick off a second refresh.
+        _hasShizuku.value = shizukuBridge.granted.value
+        _shizukuRunning.value = shizukuBridge.running.value
+
         // The bridge owns the Shizuku listeners; react to a grant landing while we are open.
         viewModelScope.launch {
-            shizukuBridge.granted.collectLatest { granted ->
-                if (granted && !_hasShizuku.value) {
-                    shellRunner.invalidateMode()
-                    refresh()
-                }
+            shizukuBridge.granted.collect { granted ->
+                val justGranted = granted && !_hasShizuku.value
                 _hasShizuku.value = granted
+                if (justGranted) {
+                    shellRunner.invalidateMode()
+                    refresh(forceRefresh = true)
+                }
             }
         }
         viewModelScope.launch {
-            shizukuBridge.running.collectLatest { _shizukuRunning.value = it }
+            shizukuBridge.running.collect { _shizukuRunning.value = it }
         }
-        refresh(forceRefresh = true)
+        // No initial refresh here on purpose: the screen asks for one when it appears, and
+        // starting a second from init only produced a refresh that got thrown away.
     }
 
     fun recheck() {
@@ -80,8 +94,15 @@ class DetailedStatsViewModel(
 
     fun clearError() = collector.clearError()
 
+    /**
+     * Refreshes everything on the screen. Overlapping calls collapse into the one already
+     * running rather than queueing behind it - opening the screen used to fire two.
+     * [forceRefresh] restarts even so, for cases where the underlying state just changed.
+     */
     fun refresh(forceRefresh: Boolean = false) {
-        viewModelScope.launch {
+        if (!forceRefresh && refreshJob?.isActive == true) return
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             if (forceRefresh) shellRunner.invalidateMode()
 
             // ADB grants and Shizuku can both change while the app is alive.
@@ -99,6 +120,12 @@ class DetailedStatsViewModel(
             if (_hasAdvanced.value) {
                 collector.refresh()
             }
+            // batterystats reports the capacity Android itself attributes against; measure
+            // it only if the dump did not carry one.
+            _capacityMah.value = BatteryCapacity.resolveMah(
+                context,
+                collector.snapshot.value?.estimatedCapacityMah ?: 0
+            ) ?: 0.0
             if (_hasRoot.value) {
                 _kernelBattery.value = RootStatsCollector.getKernelBatteryInfo()
             }

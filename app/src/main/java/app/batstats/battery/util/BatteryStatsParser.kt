@@ -29,7 +29,13 @@ object BatteryStatsParser {
         val bluetooth: BluetoothStats? = null,
         val doze: DozeStats? = null,
         val cpuFrequency: List<CpuFrequencyStats> = emptyList(),
-        val processStats: List<ProcessStats> = emptyList()
+        val processStats: List<ProcessStats> = emptyList(),
+        /**
+         * How many uid -> package mappings the dump carried. Well below [apps] size means
+         * the dump was produced by a caller that cannot see most packages, so rows fall
+         * back to "uid:NNNNN" - see the ADB note in DetailedStatsScreen.
+         */
+        val mappedPackages: Int = 0
     )
 
     data class AppPowerStats(
@@ -71,7 +77,25 @@ object BatteryStatsParser {
         val audioTimeMs: Long = 0L,
         val videoTimeMs: Long = 0L,
         val bluetoothScanTimeMs: Long = 0L,
-        val bluetoothUnoptimizedScanTimeMs: Long = 0L
+        val bluetoothUnoptimizedScanTimeMs: Long = 0L,
+        /** Filled from the human-readable dump; see [parseEstimatedPowerUse]. */
+        val powerByState: List<UidPowerState> = emptyList()
+    )
+
+    /**
+     * Power attributed to an app while it sat in one process state.
+     *
+     * Android 12 replaced BatterySipper's per-component split (cpu/wifi/gps/...) with
+     * BatteryUsageStats, which attributes an app's drain by process state instead. The
+     * per-component numbers now only exist device-wide, so this is the only per-app
+     * breakdown current releases actually report.
+     */
+    data class UidPowerState(
+        val state: String,
+        val label: String,
+        val powerMah: Double,
+        /** 0 when the dump prints the power without a duration. */
+        val durationMs: Long
     )
 
     data class WakelockStats(
@@ -218,6 +242,7 @@ object BatteryStatsParser {
         var doze: DozeStats? = null
         val cpuFreq = mutableListOf<CpuFrequencyStats>()
         val processStats = mutableListOf<ProcessStats>()
+        val uidTimes = mutableMapOf<Int, UidTimes>()
 
         var batteryRealtimeMs = 0L
         var screenOnTimeMs = 0L
@@ -277,6 +302,41 @@ object BatteryStatsParser {
                         parseSensor(parts, uidToPkg, sensors)
                     }
 
+                    // CPU: 9,<uid>,l,cpu,<userMs>,<systemMs>,<legacyPower>
+                    parts.getOrNull(2) == "l" && parts.getOrNull(3) == "cpu" -> {
+                        val uid = parts[1].toIntOrNull()
+                        if (uid != null) {
+                            val user = parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                            val system = parts.getOrNull(5)?.toLongOrNull() ?: 0L
+                            uidTimes.getOrPut(uid) { UidTimes() }.cpuMs += user + system
+                        }
+                    }
+
+                    // Foreground activity timer: 9,<uid>,l,fg,<timeMs>,<count>
+                    parts.getOrNull(2) == "l" && parts.getOrNull(3) == "fg" -> {
+                        val uid = parts[1].toIntOrNull()
+                        if (uid != null) {
+                            uidTimes.getOrPut(uid) { UidTimes() }.fgTimerMs +=
+                                parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                        }
+                    }
+
+                    // Foreground service timer: 9,<uid>,l,fgs,<timeMs>,<count>
+                    parts.getOrNull(2) == "l" && parts.getOrNull(3) == "fgs" -> {
+                        val uid = parts[1].toIntOrNull()
+                        if (uid != null) {
+                            uidTimes.getOrPut(uid) { UidTimes() }.fgsTimerMs +=
+                                parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                        }
+                    }
+
+                    // Process state times:
+                    // 9,<uid>,l,st,<top>,<fgService>,<foreground>,<background>,
+                    //              <topSleeping>,<heavyWeight>,<cached>
+                    parts.getOrNull(2) == "l" && parts.getOrNull(3) == "st" -> {
+                        parseStateTimes(parts, uidTimes)
+                    }
+
                     // Signal strength: 9,0,l,sgt,<time0>,<time1>,<time2>,<time3>,<time4>
                     parts.getOrNull(2) == "l" && parts.getOrNull(3) == "sgt" -> {
                         parseSignalStrength(parts, signalStrength)
@@ -330,6 +390,44 @@ object BatteryStatsParser {
         // The lists below are rendered with LazyColumn item keys, and Compose throws when a
         // key repeats. A checkin dump can legitimately repeat a (uid, tag) pair - one line
         // per wakelock type, per user profile - so merge duplicates instead of emitting them.
+        val mergedWakelocks = wakelocks
+            .mergeBy({ it.uid to it.tag }) { a, b ->
+                a.copy(
+                    count = a.count + b.count,
+                    totalTimeMs = a.totalTimeMs + b.totalTimeMs,
+                    maxTimeMs = maxOf(a.maxTimeMs, b.maxTimeMs),
+                    backgroundTimeMs = a.backgroundTimeMs + b.backgroundTimeMs,
+                    backgroundCount = a.backgroundCount + b.backgroundCount
+                )
+            }
+            .sortedByDescending { it.totalTimeMs }
+
+        val mergedNetwork = network
+            .mergeBy({ it.uid }) { a, b ->
+                a.copy(
+                    mobileRxBytes = a.mobileRxBytes + b.mobileRxBytes,
+                    mobileTxBytes = a.mobileTxBytes + b.mobileTxBytes,
+                    wifiRxBytes = a.wifiRxBytes + b.wifiRxBytes,
+                    wifiTxBytes = a.wifiTxBytes + b.wifiTxBytes,
+                    mobileActiveTimeMs = a.mobileActiveTimeMs + b.mobileActiveTimeMs,
+                    mobileActiveCount = a.mobileActiveCount + b.mobileActiveCount
+                )
+            }
+            .sortedByDescending {
+                it.mobileRxBytes + it.mobileTxBytes + it.wifiRxBytes + it.wifiTxBytes
+            }
+
+        val mergedSensors = sensors
+            .mergeBy({ it.uid to it.sensorHandle }) { a, b ->
+                a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
+            }
+            .sortedByDescending { it.totalTimeMs }
+
+        // Package names are resolved here rather than while parsing: the uid -> package
+        // lines are not guaranteed to precede the rows that reference them, and a row read
+        // before the mapping arrived would keep a "uid:NNNNN" placeholder for good.
+        fun named(uid: Int) = uidToPkg[uid] ?: "uid:$uid"
+
         return FullSnapshot(
             capturedAt = System.currentTimeMillis(),
             batteryRealtimeMs = batteryRealtimeMs,
@@ -337,18 +435,11 @@ object BatteryStatsParser {
             screenOffDischargePercent = screenOffDischarge,
             screenOnDischargePercent = screenOnDischarge,
             estimatedCapacityMah = estCapacity,
-            apps = appStats.values.sortedByDescending { it.powerMah },
-            wakelocks = wakelocks
-                .mergeBy({ it.uid to it.tag }) { a, b ->
-                    a.copy(
-                        count = a.count + b.count,
-                        totalTimeMs = a.totalTimeMs + b.totalTimeMs,
-                        maxTimeMs = maxOf(a.maxTimeMs, b.maxTimeMs),
-                        backgroundTimeMs = a.backgroundTimeMs + b.backgroundTimeMs,
-                        backgroundCount = a.backgroundCount + b.backgroundCount
-                    )
-                }
-                .sortedByDescending { it.totalTimeMs },
+            mappedPackages = uidToPkg.size,
+            apps = joinPerUidDetail(
+                appStats.values, mergedWakelocks, mergedNetwork, mergedSensors, uidTimes
+            ).map { it.copy(packageName = named(it.uid)) },
+            wakelocks = mergedWakelocks.map { it.copy(packageName = named(it.uid)) },
             kernelWakelocks = kernelWakelocks
                 .mergeBy({ it.name }) { a, b ->
                     a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
@@ -362,36 +453,22 @@ object BatteryStatsParser {
                         totalTimeMs = a.totalTimeMs + b.totalTimeMs
                     )
                 }
-                .sortedByDescending { it.count },
+                .sortedByDescending { it.count }
+                .map { it.copy(packageName = named(it.uid)) },
             jobs = jobs
                 .mergeBy({ it.uid to it.jobName }) { a, b ->
                     a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
                 }
-                .sortedByDescending { it.totalTimeMs },
+                .sortedByDescending { it.totalTimeMs }
+                .map { it.copy(packageName = named(it.uid)) },
             syncs = syncs
                 .mergeBy({ it.uid to it.authority }) { a, b ->
                     a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
                 }
-                .sortedByDescending { it.totalTimeMs },
-            network = network
-                .mergeBy({ it.uid }) { a, b ->
-                    a.copy(
-                        mobileRxBytes = a.mobileRxBytes + b.mobileRxBytes,
-                        mobileTxBytes = a.mobileTxBytes + b.mobileTxBytes,
-                        wifiRxBytes = a.wifiRxBytes + b.wifiRxBytes,
-                        wifiTxBytes = a.wifiTxBytes + b.wifiTxBytes,
-                        mobileActiveTimeMs = a.mobileActiveTimeMs + b.mobileActiveTimeMs,
-                        mobileActiveCount = a.mobileActiveCount + b.mobileActiveCount
-                    )
-                }
-                .sortedByDescending {
-                    it.mobileRxBytes + it.mobileTxBytes + it.wifiRxBytes + it.wifiTxBytes
-                },
-            sensors = sensors
-                .mergeBy({ it.uid to it.sensorHandle }) { a, b ->
-                    a.copy(count = a.count + b.count, totalTimeMs = a.totalTimeMs + b.totalTimeMs)
-                }
-                .sortedByDescending { it.totalTimeMs },
+                .sortedByDescending { it.totalTimeMs }
+                .map { it.copy(packageName = named(it.uid)) },
+            network = mergedNetwork.map { it.copy(packageName = named(it.uid)) },
+            sensors = mergedSensors.map { it.copy(packageName = named(it.uid)) },
             signalStrength = signalStrength,
             wifiSignal = wifiSignal,
             bluetooth = bluetooth,
@@ -407,7 +484,88 @@ object BatteryStatsParser {
                     )
                 }
                 .sortedByDescending { it.userTimeMs + it.systemTimeMs }
+                .map { it.copy(packageName = named(it.uid)) }
         )
+    }
+
+    /**
+     * Folds the per-uid detail back onto the app rows.
+     *
+     * The checkin dump reports an app's wakelocks, network counters and sensor usage on
+     * their own lines, which this parser collects into separate top-level lists. Nothing
+     * ever joined them back onto [AppPowerStats], so every one of those fields on the Apps
+     * tab rendered its data-class default of zero even though the numbers were right there.
+     */
+    private fun joinPerUidDetail(
+        apps: Collection<AppPowerStats>,
+        wakelocks: List<WakelockStats>,
+        network: List<NetworkStats>,
+        sensors: List<SensorStats>,
+        uidTimes: Map<Int, UidTimes>
+    ): List<AppPowerStats> {
+        if (apps.isEmpty()) return emptyList()
+
+        val wakelockMsByUid = wakelocks.groupingBy { it.uid }.fold(0L) { acc, w -> acc + w.totalTimeMs }
+        val networkByUid = network.associateBy { it.uid }
+        val gpsMsByUid = sensors.asSequence()
+            .filter { it.sensorHandle == GPS_SENSOR_HANDLE }
+            .groupingBy { it.uid }.fold(0L) { acc, s -> acc + s.totalTimeMs }
+        val sensorMsByUid = sensors.asSequence()
+            .filter { it.sensorHandle != GPS_SENSOR_HANDLE }
+            .groupingBy { it.uid }.fold(0L) { acc, s -> acc + s.totalTimeMs }
+
+        return apps.map { app ->
+            val net = networkByUid[app.uid]
+            val times = uidTimes[app.uid]
+            app.copy(
+                cpuTimeMs = times?.cpuMs ?: 0L,
+                wakeLockTimeMs = wakelockMsByUid[app.uid] ?: 0L,
+                gpsTimeMs = gpsMsByUid[app.uid] ?: 0L,
+                sensorTimeMs = sensorMsByUid[app.uid] ?: 0L,
+                topTimeMs = times?.topMs ?: 0L,
+                // The process-state line is the complete picture; the standalone fg/fgs
+                // timers are only a fallback for dumps that omit it.
+                foregroundTimeMs = times?.let { if (it.hasState) it.fgMs else it.fgTimerMs } ?: 0L,
+                foregroundServiceTimeMs =
+                    times?.let { if (it.hasState) it.fgsMs else it.fgsTimerMs } ?: 0L,
+                backgroundTimeMs = times?.bgMs ?: 0L,
+                cachedTimeMs = times?.cachedMs ?: 0L,
+                mobileRxBytes = net?.mobileRxBytes ?: 0L,
+                mobileTxBytes = net?.mobileTxBytes ?: 0L,
+                wifiRxBytes = net?.wifiRxBytes ?: 0L,
+                wifiTxBytes = net?.wifiTxBytes ?: 0L
+            )
+        }.sortedByDescending { it.powerMah }
+    }
+
+    /** Per-uid timers gathered from the cpu / fg / fgs / st checkin lines. */
+    private class UidTimes {
+        var cpuMs = 0L
+        var fgTimerMs = 0L
+        var fgsTimerMs = 0L
+        var topMs = 0L
+        var fgsMs = 0L
+        var fgMs = 0L
+        var bgMs = 0L
+        var cachedMs = 0L
+        var hasState = false
+    }
+
+    /**
+     * Process-state times. The column count has grown across Android releases, so only
+     * "top" (the first column) is read unconditionally; the rest need the 7-state layout
+     * that current releases emit.
+     */
+    private fun parseStateTimes(parts: List<String>, uidTimes: MutableMap<Int, UidTimes>) {
+        val uid = parts[1].toIntOrNull() ?: return
+        val times = uidTimes.getOrPut(uid) { UidTimes() }
+        times.topMs += parts.getOrNull(4)?.toLongOrNull() ?: 0L
+        if (parts.size < 11) return
+        times.hasState = true
+        times.fgsMs += parts.getOrNull(5)?.toLongOrNull() ?: 0L
+        times.fgMs += parts.getOrNull(6)?.toLongOrNull() ?: 0L
+        times.bgMs += parts.getOrNull(7)?.toLongOrNull() ?: 0L
+        times.cachedMs += parts.getOrNull(10)?.toLongOrNull() ?: 0L
     }
 
     /** Collapses entries that share a key, preserving first-seen order. */
@@ -431,10 +589,21 @@ object BatteryStatsParser {
         val type = parts.getOrNull(4) ?: return
         val mah = parts.getOrNull(5)?.toDoubleOrNull() ?: 0.0
 
+        // 9,<uid>,l,pwi,<label>,<mAh>,<shouldHide>,<screenMah>,<smearMah>
+        // Only rows labelled "uid" are per-app; the rest are device-wide component totals
+        // (scrn, cpu, cell, gnss, ...) reported against uid 0.
         if (type == "uid") {
             val pkg = uidToPkg[uid] ?: "uid:$uid"
+            // Column 7 is the screen share, and it checks out: screen plus the process-state
+            // figures sums to the total. Column 8 does not - on a real device it came back
+            // larger than the app's own total - so it is left alone until it can be
+            // explained rather than surfaced as a number nobody can act on.
+            val screen = parts.getOrNull(7)?.toDoubleOrNull() ?: 0.0
             val existing = appStats[uid] ?: AppPowerStats(uid = uid, packageName = pkg, powerMah = 0.0)
-            appStats[uid] = existing.copy(powerMah = existing.powerMah + mah)
+            appStats[uid] = existing.copy(
+                powerMah = existing.powerMah + mah,
+                screenPowerMah = existing.screenPowerMah + screen
+            )
         }
     }
 
@@ -760,14 +929,138 @@ object BatteryStatsParser {
         )
     }
 
+    /** batterystats reports GPS as a pseudo-sensor with this handle. */
+    private const val GPS_SENSOR_HANDLE = -10000
+
     private fun getSensorName(handle: Int): String = when (handle) {
-        -10000 -> "GPS"
+        GPS_SENSOR_HANDLE -> "GPS"
         else -> "Sensor #$handle"
     }
 
     private inline fun List<String>.indexOfFrom(start: Int, predicate: (String) -> Boolean): Int {
         for (i in start until size) if (predicate(this[i])) return i
         return -1
+    }
+
+    /**
+     * Shell command that yields the input for [parseEstimatedPowerUse].
+     *
+     * The full `dumpsys batterystats` output is enormous, so the filtering is done on the
+     * device: only the per-UID power lines come back.
+     */
+    const val POWER_USE_COMMAND =
+        "dumpsys batterystats | grep -E '^[[:space:]]*UID ' | head -n 400"
+
+    // "  UID u0a285: 219 fg: 99.9 (22m 19s 961ms) bg: 2.80 (15m 40s 873ms) cached: 42.3 (...)"
+    private val UID_POWER_LINE =
+        Regex("""^\s*UID\s+(\S+?):\s*([0-9.]+(?:[eE][+-]?\d+)?)\s*(.*)$""")
+
+    // Each "<state>: <mAh>" pair, with the duration in brackets when the dump includes one.
+    // "fgs" precedes "fg" so the longer name wins rather than relying on backtracking.
+    private val UID_POWER_STATE =
+        Regex("""\b(fgs|fg|bg|cached)\s*:\s*([0-9.]+(?:[eE][+-]?\d+)?)(?:\s*\(([^)]*)\))?""")
+
+    private val USER_APP_UID = Regex("""^u(\d+)a(\d+)$""")
+
+    private val DURATION_PART = Regex("""(\d+)\s*(ms|h|m|s)""")
+
+    private fun stateLabel(state: String): String = when (state) {
+        "fg" -> "Foreground"
+        "fgs" -> "Foreground service"
+        "bg" -> "Background"
+        "cached" -> "Cached"
+        else -> state
+    }
+
+    /**
+     * Parses the per-UID rows of the `Estimated power use (mAh)` section into a
+     * uid -> process-state breakdown.
+     */
+    fun parseEstimatedPowerUse(raw: String): Map<Int, List<UidPowerState>> {
+        val result = LinkedHashMap<Int, List<UidPowerState>>()
+        raw.lineSequence().forEach { line ->
+            val match = UID_POWER_LINE.find(line) ?: return@forEach
+            val uid = parseUidToken(match.groupValues[1]) ?: return@forEach
+            val states = UID_POWER_STATE.findAll(match.groupValues[3])
+                .map { entry ->
+                    val state = entry.groupValues[1]
+                    UidPowerState(
+                        state = state,
+                        label = stateLabel(state),
+                        powerMah = entry.groupValues[2].toDoubleOrNull() ?: 0.0,
+                        durationMs = parseHumanDuration(entry.groupValues[3])
+                    )
+                }
+                .filter { it.powerMah > 0.0 || it.durationMs > 0L }
+                .toList()
+            if (states.isNotEmpty()) result[uid] = states
+        }
+        return result
+    }
+
+    /**
+     * Fills in package names the dump could not supply.
+     *
+     * [resolve] is asked only about rows still showing the "uid:NNNNN" placeholder, and only
+     * once per uid; returning null leaves the placeholder in place.
+     */
+    fun applyPackageNames(snapshot: FullSnapshot, resolve: (Int) -> String?): FullSnapshot {
+        val looked = HashMap<Int, String?>()
+        fun name(uid: Int, current: String): String {
+            if (current != "uid:$uid") return current
+            return looked.getOrPut(uid) { resolve(uid) } ?: current
+        }
+        return snapshot.copy(
+            apps = snapshot.apps.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            wakelocks = snapshot.wakelocks.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            alarms = snapshot.alarms.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            jobs = snapshot.jobs.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            syncs = snapshot.syncs.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            network = snapshot.network.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            sensors = snapshot.sensors.map { it.copy(packageName = name(it.uid, it.packageName)) },
+            processStats = snapshot.processStats.map {
+                it.copy(packageName = name(it.uid, it.packageName))
+            }
+        )
+    }
+
+    /** Folds a [parseEstimatedPowerUse] result onto an already-parsed checkin snapshot. */
+    fun applyPowerStates(
+        snapshot: FullSnapshot,
+        byUid: Map<Int, List<UidPowerState>>
+    ): FullSnapshot {
+        if (byUid.isEmpty()) return snapshot
+        return snapshot.copy(
+            apps = snapshot.apps.map { app ->
+                byUid[app.uid]?.let { app.copy(powerByState = it) } ?: app
+            }
+        )
+    }
+
+    /** "u0a285" -> 10285, "1000" -> 1000. */
+    private fun parseUidToken(token: String): Int? {
+        token.toIntOrNull()?.let { return it }
+        val match = USER_APP_UID.matchEntire(token) ?: return null
+        val user = match.groupValues[1].toIntOrNull() ?: return null
+        val appId = match.groupValues[2].toIntOrNull() ?: return null
+        return user * 100_000 + 10_000 + appId
+    }
+
+    /** "4h 0m 31s 150ms" -> 14431150. Returns 0 for an empty or unrecognised string. */
+    private fun parseHumanDuration(text: String): Long {
+        if (text.isBlank()) return 0L
+        var total = 0L
+        DURATION_PART.findAll(text).forEach { part ->
+            val value = part.groupValues[1].toLongOrNull() ?: return@forEach
+            total += when (part.groupValues[2]) {
+                "ms" -> value
+                "s" -> value * 1_000L
+                "m" -> value * 60_000L
+                "h" -> value * 3_600_000L
+                else -> 0L
+            }
+        }
+        return total
     }
 
     data class DeviceIdleInfo(

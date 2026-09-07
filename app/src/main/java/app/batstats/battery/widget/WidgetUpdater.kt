@@ -9,43 +9,35 @@ import android.widget.RemoteViews
 import app.batstats.R
 import app.batstats.battery.BatteryMainActivity
 import app.batstats.battery.data.db.BatterySample
+import app.batstats.battery.util.BatteryReader
 import app.batstats.battery.util.TimeEstimator
+import java.util.Locale
 
 object WidgetUpdater {
     const val ACTION_REFRESH = "app.batstats.battery.widget.ACTION_REFRESH"
 
-    fun push(ctx: Context, s: BatterySample) {
+    private const val EM_DASH = "—"
+
+    fun push(ctx: Context, s: BatterySample, useFahrenheit: Boolean = false) {
         updateLevel(ctx, s)
-        updateTemp(ctx, s)
+        updateTemp(ctx, s, useFahrenheit)
         updateTime(ctx, s)
     }
 
+    /**
+     * Renders from the battery's own current state rather than from whatever the monitoring
+     * service last handed over. Widgets used to be pushed only from that service, so with it
+     * stopped they showed a frozen reading indefinitely.
+     */
+    fun refreshFromSystem(ctx: Context, useFahrenheit: Boolean = false) {
+        val sample = BatteryReader.currentSample(ctx)
+        if (sample == null) showPlaceholder(ctx) else push(ctx, sample, useFahrenheit)
+    }
+
     fun showPlaceholder(ctx: Context) {
-        val mgr = AppWidgetManager.getInstance(ctx)
-
-        // Level widget placeholder
-        val levelIds = mgr.getAppWidgetIds(ComponentName(ctx, BatteryLevelWidget::class.java))
-        val levelRv = createRemoteViews(ctx).apply {
-            setTextViewText(R.id.title, "Battery")
-            setTextViewText(R.id.value, "—")
-        }
-        levelIds.forEach { mgr.updateAppWidget(it, levelRv) }
-
-        // Temp widget placeholder
-        val tempIds = mgr.getAppWidgetIds(ComponentName(ctx, BatteryTempWidget::class.java))
-        val tempRv = createRemoteViews(ctx).apply {
-            setTextViewText(R.id.title, "Temperature")
-            setTextViewText(R.id.value, "—")
-        }
-        tempIds.forEach { mgr.updateAppWidget(it, tempRv) }
-
-        // Time widget placeholder
-        val timeIds = mgr.getAppWidgetIds(ComponentName(ctx, BatteryTimeWidget::class.java))
-        val timeRv = createRemoteViews(ctx).apply {
-            setTextViewText(R.id.title, "ETA")
-            setTextViewText(R.id.value, "—")
-        }
-        timeIds.forEach { mgr.updateAppWidget(it, timeRv) }
+        setAll(ctx, BatteryLevelWidget::class.java, ctx.getString(R.string.widget_battery), EM_DASH)
+        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), EM_DASH)
+        setAll(ctx, BatteryTimeWidget::class.java, ctx.getString(R.string.widget_eta), EM_DASH)
     }
 
     private fun createRemoteViews(ctx: Context): RemoteViews {
@@ -63,36 +55,43 @@ object WidgetUpdater {
         return rv
     }
 
-    private fun updateLevel(ctx: Context, s: BatterySample) {
+    private fun setAll(ctx: Context, provider: Class<*>, title: String, value: String) {
         val mgr = AppWidgetManager.getInstance(ctx)
-        val ids = mgr.getAppWidgetIds(ComponentName(ctx, BatteryLevelWidget::class.java))
+        val ids = mgr.getAppWidgetIds(ComponentName(ctx, provider))
+        if (ids.isEmpty()) return
         val rv = createRemoteViews(ctx).apply {
-            setTextViewText(R.id.title, "Battery")
-            setTextViewText(R.id.value, "${s.levelPercent}%")
+            setTextViewText(R.id.title, title)
+            setTextViewText(R.id.value, value)
         }
         ids.forEach { mgr.updateAppWidget(it, rv) }
     }
 
-    private fun updateTemp(ctx: Context, s: BatterySample) {
-        val mgr = AppWidgetManager.getInstance(ctx)
-        val ids = mgr.getAppWidgetIds(ComponentName(ctx, BatteryTempWidget::class.java))
+    private fun updateLevel(ctx: Context, s: BatterySample) {
+        setAll(
+            ctx,
+            BatteryLevelWidget::class.java,
+            ctx.getString(R.string.widget_battery),
+            "${s.levelPercent}%"
+        )
+    }
+
+    private fun updateTemp(ctx: Context, s: BatterySample, useFahrenheit: Boolean) {
         val tempC = (s.temperatureDeciC ?: 0) / 10.0
-        val rv = createRemoteViews(ctx).apply {
-            setTextViewText(R.id.title, "Temperature")
-            setTextViewText(R.id.value, String.format("%.1f °C", tempC))
+        val value = if (useFahrenheit) {
+            String.format(Locale.getDefault(), "%.1f °F", tempC * 9 / 5 + 32)
+        } else {
+            String.format(Locale.getDefault(), "%.1f °C", tempC)
         }
-        ids.forEach { mgr.updateAppWidget(it, rv) }
+        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), value)
     }
 
     private fun updateTime(ctx: Context, s: BatterySample) {
-        val mgr = AppWidgetManager.getInstance(ctx)
-        val ids = mgr.getAppWidgetIds(ComponentName(ctx, BatteryTimeWidget::class.java))
-        val eta = TimeEstimator.etaString(s) ?: "—"
-        val rv = createRemoteViews(ctx).apply {
-            setTextViewText(R.id.title, "ETA")
-            setTextViewText(R.id.value, eta)
-        }
-        ids.forEach { mgr.updateAppWidget(it, rv) }
+        setAll(
+            ctx,
+            BatteryTimeWidget::class.java,
+            ctx.getString(R.string.widget_eta),
+            TimeEstimator.etaString(s) ?: EM_DASH
+        )
     }
 
     fun requestRefresh(ctx: Context) {

@@ -128,7 +128,7 @@ fun BatterySettingsScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
                 actions = {
@@ -193,14 +193,14 @@ fun BatterySettingsScreen(
 
                             if (categoryClass == Data::class) {
                                 SettingsAction(
-                                    title = "Export Battery Data",
+                                    title = stringResource(R.string.export_battery_data),
                                     description = "Export battery history to file",
 //                                    buttonText = "Open",
                                     onClick = onExportData
                                 )
 
                                 SettingsAction(
-                                    title = "Clear All Data",
+                                    title = stringResource(R.string.clear_all_data),
                                     description = "Delete all stored battery data",
 //                                    buttonText = "Clear",
                                     onClick = { showClearDataDialog = true }

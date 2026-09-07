@@ -26,15 +26,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.batstats.R
 import app.batstats.battery.drain.DrainState
+import app.batstats.battery.drain.formatBatteryPercent
+import app.batstats.battery.drain.formatBatteryPercentRate
 import app.batstats.battery.drain.formatDrainRate
+import app.batstats.battery.drain.formatDrainRateWithPercent
 import app.batstats.battery.drain.formatDuration
+import app.batstats.battery.drain.formatMahWithPercent
 import app.batstats.viewmodel.DrainStatsViewModel
-import org.koin.androidx.compose.koinViewModel
 import java.util.Locale
+import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +60,7 @@ fun DrainStatsScreen(
             LargeTopAppBar(
                 title = {
                     Column {
-                        Text("Drain Statistics")
+                        Text(stringResource(R.string.drain_statistics))
                         Text(
                             if (isTracking) "Tracking active" else "Tracking paused",
                             style = MaterialTheme.typography.labelMedium,
@@ -215,7 +221,7 @@ private fun CurrentStateCard(state: DrainState) {
                 )
                 
                 Text(
-                    "Total drain: ${String.format(Locale.getDefault(), "%.1f mAh", state.totalDrainMah)}",
+                    "Total drain: ${formatMahWithPercent(state.totalDrainMah, state.capacityMah)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -244,26 +250,30 @@ private fun DrainRatesCard(state: DrainState) {
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 DrainRateItem(
+                    capacityMah = state.capacityMah,
                     icon = Icons.Outlined.Smartphone,
-                    label = "Screen On",
+                    label = stringResource(R.string.screen_on),
                     rate = state.screenOnDrainRate,
                     color = Color(0xFFFF9800)
                 )
                 DrainRateItem(
+                    capacityMah = state.capacityMah,
                     icon = Icons.Outlined.PhonelinkErase,
-                    label = "Screen Off",
+                    label = stringResource(R.string.screen_off),
                     rate = state.screenOffDrainRate,
                     color = Color(0xFF2196F3)
                 )
                 DrainRateItem(
+                    capacityMah = state.capacityMah,
                     icon = Icons.Outlined.NightsStay,
-                    label = "Deep Sleep",
+                    label = stringResource(R.string.deep_sleep),
                     rate = state.deepSleepDrainRate,
                     color = Color(0xFF4CAF50)
                 )
                 DrainRateItem(
+                    capacityMah = state.capacityMah,
                     icon = Icons.Outlined.WbSunny,
-                    label = "Awake",
+                    label = stringResource(R.string.awake),
                     rate = state.awakeDrainRate,
                     color = Color(0xFFE91E63)
                 )
@@ -273,14 +283,18 @@ private fun DrainRatesCard(state: DrainState) {
 }
 
 @Composable
-private fun DrainRateItem(
+private fun RowScope.DrainRateItem(
+    capacityMah: Double,
     icon: ImageVector,
     label: String,
     rate: Double,
     color: Color
 ) {
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        // An equal share of the row: four items sized to their own text used to overflow
+        // and push the last one into a one-character-per-line column.
+        modifier = Modifier.weight(1f)
     ) {
         Surface(
             shape = CircleShape,
@@ -298,12 +312,23 @@ private fun DrainRateItem(
         Text(
             formatDrainRate(rate),
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
         )
+        val percent = formatBatteryPercentRate(rate, capacityMah)
+        if (percent.isNotEmpty()) {
+            Text(
+                percent,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                maxLines = 1
+            )
+        }
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
     }
 }
@@ -326,7 +351,8 @@ private fun ScreenBreakdownCard(state: DrainState) {
             // Screen On
             DrainStatRow(
                 icon = Icons.Outlined.Smartphone,
-                label = "Screen On",
+                label = stringResource(R.string.screen_on),
+                capacityMah = state.capacityMah,
                 drainRate = state.screenOnDrainRate,
                 drainTotal = state.screenOnDrainMah,
                 time = state.screenOnTimeMs,
@@ -339,7 +365,8 @@ private fun ScreenBreakdownCard(state: DrainState) {
             // Screen Off
             DrainStatRow(
                 icon = Icons.Outlined.PhonelinkErase,
-                label = "Screen Off",
+                label = stringResource(R.string.screen_off),
+                capacityMah = state.capacityMah,
                 drainRate = state.screenOffDrainRate,
                 drainTotal = state.screenOffDrainMah,
                 time = state.screenOffTimeMs,
@@ -352,6 +379,7 @@ private fun ScreenBreakdownCard(state: DrainState) {
 
 @Composable
 private fun DrainStatRow(
+    capacityMah: Double,
     icon: ImageVector,
     label: String,
     drainRate: Double,
@@ -370,7 +398,7 @@ private fun DrainStatRow(
             Text(label, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.weight(1f))
             Text(
-                formatDrainRate(drainRate),
+                formatDrainRateWithPercent(drainRate, capacityMah),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 color = color
@@ -389,7 +417,7 @@ private fun DrainStatRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                String.format(Locale.getDefault(), "%.1f mAh", drainTotal),
+                formatMahWithPercent(drainTotal, capacityMah),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -492,7 +520,7 @@ private fun DeepSleepCard(state: DrainState) {
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        formatDrainRate(state.deepSleepDrainRate),
+                        formatDrainRateWithPercent(state.deepSleepDrainRate, state.capacityMah),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -504,7 +532,7 @@ private fun DeepSleepCard(state: DrainState) {
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        String.format(Locale.getDefault(), "%.1f mAh", state.deepSleepDrainMah),
+                        formatMahWithPercent(state.deepSleepDrainMah, state.capacityMah),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -541,7 +569,8 @@ private fun ActivityBreakdownCard(state: DrainState) {
                 // Active
                 ActivityStatItem(
                     icon = Icons.Outlined.FlashOn,
-                    label = "Active",
+                    label = stringResource(R.string.active),
+                    capacityMah = state.capacityMah,
                     drainRate = state.activeDrainRate,
                     time = state.activeTimeMs,
                     drainTotal = state.activeDrainMah,
@@ -551,7 +580,8 @@ private fun ActivityBreakdownCard(state: DrainState) {
                 // Idle
                 ActivityStatItem(
                     icon = Icons.Outlined.Bedtime,
-                    label = "Idle",
+                    label = stringResource(R.string.idle),
+                    capacityMah = state.capacityMah,
                     drainRate = state.idleDrainRate,
                     time = state.idleTimeMs,
                     drainTotal = state.idleDrainMah,
@@ -561,7 +591,8 @@ private fun ActivityBreakdownCard(state: DrainState) {
                 // Awake (Screen Off)
                 ActivityStatItem(
                     icon = Icons.Outlined.WbSunny,
-                    label = "Awake",
+                    label = stringResource(R.string.awake),
+                    capacityMah = state.capacityMah,
                     drainRate = state.awakeDrainRate,
                     time = state.awakeTimeMs,
                     drainTotal = state.awakeDrainMah,
@@ -573,7 +604,8 @@ private fun ActivityBreakdownCard(state: DrainState) {
 }
 
 @Composable
-private fun ActivityStatItem(
+private fun RowScope.ActivityStatItem(
+    capacityMah: Double,
     icon: ImageVector,
     label: String,
     drainRate: Double,
@@ -583,7 +615,7 @@ private fun ActivityStatItem(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(100.dp)
+        modifier = Modifier.weight(1f)
     ) {
         Surface(
             shape = CircleShape,
@@ -610,20 +642,43 @@ private fun ActivityStatItem(
             formatDrainRate(drainRate),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            color = color
+            color = color,
+            maxLines = 1
         )
-        
+
+        val ratePercent = formatBatteryPercentRate(drainRate, capacityMah)
+        if (ratePercent.isNotEmpty()) {
+            Text(
+                ratePercent,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                maxLines = 1
+            )
+        }
+
         Text(
             formatDuration(time),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
-        
+
         Text(
             String.format(Locale.getDefault(), "%.1f mAh", drainTotal),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
+
+        val totalPercent = formatBatteryPercent(drainTotal, capacityMah)
+        if (totalPercent.isNotEmpty()) {
+            Text(
+                totalPercent,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
     }
 }
 
@@ -650,18 +705,18 @@ private fun SessionSummaryCard(state: DrainState) {
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 SummaryItem(
-                    label = "Duration",
+                    label = stringResource(R.string.duration),
                     value = formatDuration(state.totalTimeMs),
                     icon = Icons.Outlined.Timer
                 )
                 SummaryItem(
-                    label = "Total Drain",
-                    value = String.format(Locale.getDefault(), "%.1f mAh", state.totalDrainMah),
+                    label = stringResource(R.string.total_drain),
+                    value = formatMahWithPercent(state.totalDrainMah, state.capacityMah),
                     icon = Icons.Outlined.BatteryAlert
                 )
                 SummaryItem(
-                    label = "Avg Rate",
-                    value = formatDrainRate(state.averageDrainRate),
+                    label = stringResource(R.string.avg_rate),
+                    value = formatDrainRateWithPercent(state.averageDrainRate, state.capacityMah),
                     icon = Icons.Outlined.Speed
                 )
             }

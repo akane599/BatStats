@@ -11,16 +11,23 @@ import app.batstats.battery.drain.DrainNotificationManager
 import android.app.Notification
 import android.app.NotificationManager
 import android.util.Log
+import app.batstats.battery.data.BatteryRepository
+import app.batstats.battery.data.DataRetentionManager
+import app.batstats.battery.drain.formatLevelRatePerHour
 import app.batstats.battery.shizuku.BstatsCollector
 import app.batstats.battery.util.Notifier
 import app.batstats.battery.util.ShellRunner
+import app.batstats.battery.util.TimeEstimator
 import app.batstats.battery.widget.WidgetUpdater
+import app.batstats.settings.useFahrenheit
 import app.batstats.insights.ForegroundDrainTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 import java.util.concurrent.atomic.AtomicBoolean
@@ -37,8 +44,12 @@ class BatteryMonitorService : Service() {
     private val drainNotificationManager: DrainNotificationManager by inject()
     private val shellRunner: ShellRunner by inject()
     private val enhancedCollector: BstatsCollector by inject()
+    private val dataRetentionManager: DataRetentionManager by inject()
 
     private var useAdvancedNotification = false
+
+    /** Tracked live so the widgets follow a unit change without waiting for a restart. */
+    @Volatile private var useFahrenheit = false
 
     /** onStartCommand can fire repeatedly (START_STICKY restarts, re-issued intents). */
     private val started = AtomicBoolean(false)
@@ -59,6 +70,18 @@ class BatteryMonitorService : Service() {
 
         // Everything below only needs to run once per service lifetime.
         if (!started.compareAndSet(false, true)) return START_STICKY
+
+        // Monitoring is exactly when the database grows, so it is also when it gets pruned.
+        serviceScope.launch {
+            while (isActive) {
+                dataRetentionManager.cleanupIfDue()
+                delay(DataRetentionManager.CLEANUP_INTERVAL_MS)
+            }
+        }
+
+        serviceScope.launch {
+            BatteryGraph.settings.flow.collect { useFahrenheit = it.useFahrenheit }
+        }
 
         serviceScope.launch {
             val settings = BatteryGraph.settings.flow.first()
@@ -105,16 +128,16 @@ class BatteryMonitorService : Service() {
             // Update notification and widgets
             BatteryGraph.repo.realtimeFlow.collect { rt ->
                 // Always update widgets
-                rt.sample?.let { WidgetUpdater.push(this@BatteryMonitorService, it) }
+                rt.sample?.let {
+                    WidgetUpdater.push(this@BatteryMonitorService, it, useFahrenheit)
+                }
 
                 // Update standard notification if not using advanced
                 if (!useAdvancedNotification || !hasAdvanced) {
-                    val text = if (rt.sample == null)
-                        "Waiting for battery data…"
-                    else
-                        "Level ${rt.level}% • ${rt.currentMa} mA • ${rt.voltageMv} mV"
-
-                    val running = Notifier.monitoringNotification(this@BatteryMonitorService, text)
+                    val running = Notifier.monitoringNotification(
+                        this@BatteryMonitorService,
+                        monitoringText(rt)
+                    )
                     try {
                         val nm = getSystemService(android.app.NotificationManager::class.java)
                         nm.notify(Notifier.NOTIF_ID, running)
@@ -124,6 +147,18 @@ class BatteryMonitorService : Service() {
         }
 
         return START_STICKY
+    }
+
+    /**
+     * The rate of change is shown as a share of the battery per hour rather than in mA: a
+     * phone pulling 780 mA tells you little on its own, "-4.1%/h" tells you how long you
+     * have. Devices whose capacity we cannot establish keep the mA reading.
+     */
+    private fun monitoringText(rt: BatteryRepository.Realtime): String {
+        val sample = rt.sample ?: return "Waiting for battery data…"
+        val capacity = TimeEstimator.capacityMahFor(sample)
+        val rate = formatLevelRatePerHour(rt.currentMa, capacity) ?: "${rt.currentMa} mA"
+        return "Level ${rt.level}% • $rate • ${rt.voltageMv} mV"
     }
 
     private fun goForeground(id: Int, notification: Notification): Boolean = try {
@@ -154,6 +189,9 @@ class BatteryMonitorService : Service() {
         enhancedCollector.stop()
         drainNotificationManager.stopNotification()
         serviceScope.cancel()
+        // Stopping monitoring is exactly when widgets start going stale, so hand them one
+        // last refresh from the system rather than leaving them on our final live push.
+        WidgetUpdater.requestRefresh(this)
         super.onDestroy()
     }
 

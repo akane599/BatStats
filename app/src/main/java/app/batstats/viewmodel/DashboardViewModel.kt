@@ -77,12 +77,8 @@ class DashboardViewModel(
             // Repo update happens in Service.onDestroy
         } else {
             Notifier.ensureChannel(app)
-            val intent = Intent(app, BatteryMonitorService::class.java)
-            if (Build.VERSION.SDK_INT >= 26) {
-                app.startForegroundService(intent)
-            } else {
-                app.startService(intent)
-            }
+            // minSdk is 26, so the pre-O startService branch was unreachable.
+            app.startForegroundService(Intent(app, BatteryMonitorService::class.java))
             // Repo update happens in Service.onStartCommand
         }
     }

@@ -16,13 +16,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.batstats.R
 import app.batstats.viewmodel.SessionDetailsViewModel
-import kotlin.math.abs
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.*
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,8 +37,8 @@ fun SessionDetailsScreen(
 
     Scaffold(topBar = {
         LargeTopAppBar(
-            title = { Text("Session details") },
-            navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
+            title = { Text(stringResource(R.string.session_details)) },
+            navigationIcon = { TextButton(onClick = onBack) { Text(stringResource(R.string.back)) } },
             actions = {
 //                IconButton(onClick = { /* share later */ }) { Icon(Icons.Outlined.Share, null) }
 //                IconButton(onClick = { /* export later */ }) { Icon(Icons.Outlined.Download, null) }
@@ -65,15 +67,18 @@ fun SessionDetailsScreen(
 
             ElevatedCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("${ui.type} • ${ui.levelRange}", style = MaterialTheme.typography.titleMedium)
-                    Text("Start: $startStr", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("End: $endStr", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.session_summary, ui.type, ui.levelRange),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(stringResource(R.string.start_time, startStr), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.end_time, endStr), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         ui.capacityMah?.let {
-                            AssistChip(onClick = {}, label = { Text("~${it} mAh") })
+                            AssistChip(onClick = {}, label = { Text(stringResource(R.string.milliamp_hours_approx, it)) })
                         }
                         ui.avgCurrent?.let {
-                            AssistChip(onClick = {}, label = { Text("${it / 1000} mA avg") })
+                            AssistChip(onClick = {}, label = { Text(stringResource(R.string.milliamp_average, (it / 1000).toInt())) })
                         }
                     }
                 }

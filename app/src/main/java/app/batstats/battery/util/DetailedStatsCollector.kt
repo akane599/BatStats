@@ -25,6 +25,7 @@ class DetailedStatsCollector(
     private val shellRunner: ShellRunner,
     private val db: BatteryDatabase,
     private val context: Context,
+    private val checkinSource: CheckinSource,
     // NOTE: only for direct checks (if later used)
     private val shizuku: ShizukuBridge? = null
 ) {
@@ -37,6 +38,7 @@ class DetailedStatsCollector(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val refreshing = AtomicBoolean(false)
+    private val packageNames = PackageNameResolver(context)
 
     private val _snapshot = MutableStateFlow<BatteryStatsParser.FullSnapshot?>(null)
     val snapshot: StateFlow<BatteryStatsParser.FullSnapshot?> = _snapshot.asStateFlow()
@@ -76,22 +78,49 @@ class DetailedStatsCollector(
             var hasData = false
             var firstFailure: String? = null
 
-            // Battery stats - the one that actually matters.
+            // Battery stats - the one that actually matters. Shared with the background
+            // per-app poller so the dump is produced once, not once per collector.
             Log.d(TAG, "Fetching batterystats...")
-            when (val stats = shellRunner.exec("dumpsys batterystats --checkin")) {
+            when (val stats = checkinSource.get()) {
                 is ShellRunner.Outcome.Success -> {
                     _mode.value = stats.mode
                     Log.d(TAG, "Parsing batterystats (${stats.output.length} chars, via ${stats.mode})...")
                     val parsed = BatteryStatsParser.parseCheckin(stats.output)
-                    _snapshot.value = parsed
+                    // The dump's own uid -> package map is incomplete whenever the caller
+                    // could not see other packages; fill the gaps locally.
+                    val named = BatteryStatsParser.applyPackageNames(parsed, packageNames::nameFor)
+                    _snapshot.value = named
                     hasData = true
-                    Log.d(TAG, "Parsed ${parsed.apps.size} apps, ${parsed.wakelocks.size} wakelocks")
+                    Log.d(
+                        TAG,
+                        "Parsed ${named.apps.size} apps, ${named.wakelocks.size} wakelocks, " +
+                            "${parsed.mappedPackages} names from the dump, " +
+                            "${named.apps.count { it.packageName != "uid:${it.uid}" }} resolved"
+                    )
                 }
 
                 is ShellRunner.Outcome.Failure -> {
                     _mode.value = stats.mode
                     firstFailure = describe(stats)
                     Log.e(TAG, "batterystats failed: ${stats.mode} / ${stats.message}")
+                }
+            }
+
+            // Per-app power split by process state. Current Android reports this only in
+            // the human-readable dump - the checkin format carries a per-app total and no
+            // breakdown at all - so it takes a second, filtered pass.
+            if (_snapshot.value != null) {
+                when (val power = shellRunner.exec(BatteryStatsParser.POWER_USE_COMMAND)) {
+                    is ShellRunner.Outcome.Success -> {
+                        val byUid = BatteryStatsParser.parseEstimatedPowerUse(power.output)
+                        Log.d(TAG, "Power-use breakdown for ${byUid.size} uids")
+                        _snapshot.value = _snapshot.value?.let {
+                            BatteryStatsParser.applyPowerStates(it, byUid)
+                        }
+                    }
+
+                    is ShellRunner.Outcome.Failure ->
+                        Log.w(TAG, "power-use dump failed: ${power.message}")
                 }
             }
 
@@ -151,6 +180,9 @@ class DetailedStatsCollector(
     suspend fun resetStats(): Boolean {
         // A successful reset prints nothing at all, so an empty result is a success here.
         val outcome = shellRunner.exec("dumpsys batterystats --reset", allowEmpty = true)
+        // Every cached counter just went to zero; serving the pre-reset dump would make the
+        // reset look as though it had not worked.
+        checkinSource.invalidate()
         return outcome is ShellRunner.Outcome.Success
     }
 

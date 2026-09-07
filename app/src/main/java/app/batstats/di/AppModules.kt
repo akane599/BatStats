@@ -2,6 +2,7 @@ package app.batstats.di
 
 import android.os.Build
 import app.batstats.battery.data.BatteryRepository
+import app.batstats.battery.data.DataRetentionManager
 import app.batstats.battery.data.ExportImportManager
 import app.batstats.battery.data.db.BatteryDatabase
 import app.batstats.battery.drain.AdvancedDrainTracker
@@ -83,6 +84,7 @@ val appModule = module {
 
     single { ExportImportManager(androidContext(), get()) }
     single { BatteryRepository(androidContext(), get(), get(), get()) }
+    single { DataRetentionManager(get(), get()) }
     single { ForegroundDrainTracker(androidContext(), get(), get<BatteryDatabase>().appEnergyDao()) }
 
     single { AdvancedDrainTracker(androidContext(), get(), get(), get(), get()) }

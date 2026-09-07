@@ -509,7 +509,12 @@ private fun ControlCenter(
 
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "${session.type} session active • started $startedAt",
+                        text = buildString {
+                            append("${session.type} session active • started $startedAt")
+                            // Sessions now open and close with the charger, so say which
+                            // ones appeared on their own rather than leaving it a mystery.
+                            if (session.autoStarted) append(" • tracked automatically")
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

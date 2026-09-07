@@ -2,6 +2,7 @@ package app.batstats.battery
 
 import android.app.Application
 import app.batstats.battery.data.BatteryRepository
+import app.batstats.battery.data.DataRetentionManager
 import app.batstats.battery.data.db.BatteryDatabase
 import app.batstats.battery.shizuku.ShizukuBridge
 import app.batstats.di.appModule
@@ -22,6 +23,7 @@ class BatteryApp : Application() {
     private val appScope: CoroutineScope by inject()
     private val migrationManager: MigrationManager by inject()
     private val shizukuBridge: ShizukuBridge by inject()
+    private val dataRetentionManager: DataRetentionManager by inject()
 
     override fun onCreate() {
         super.onCreate()
@@ -39,6 +41,12 @@ class BatteryApp : Application() {
         // Run migrations
         appScope.launch {
             migrationManager.migrate()
+        }
+
+        // Catches the case where monitoring is never switched on: the sample table would
+        // otherwise keep whatever it accumulated forever.
+        appScope.launch {
+            dataRetentionManager.cleanupIfDue()
         }
     }
 }

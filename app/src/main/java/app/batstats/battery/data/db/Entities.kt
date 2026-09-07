@@ -38,7 +38,14 @@ data class ChargeSession(
     val endLevel: Int?,
     val deltaUah: Long?,            // integrated charge delta
     val avgCurrentUa: Long?,        // session average
-    val estCapacityMah: Int?        // estimated capacity from this session
+    val estCapacityMah: Int?,       // estimated capacity from this session
+
+    // Opened by the plug/unplug watcher rather than by the user. Only these are closed
+    // automatically - a session someone started by hand is theirs to end.
+    // The declared default matters: it has to match what MIGRATION_2_3 adds, or Room
+    // rejects the migrated table at open time.
+    @ColumnInfo(defaultValue = "0")
+    val autoStarted: Boolean = false
 )
 
 enum class SessionType { CHARGE, DISCHARGE }

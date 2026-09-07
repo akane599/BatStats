@@ -11,6 +11,7 @@ import app.batstats.battery.drain.DrainNotificationManager
 import android.app.Notification
 import android.app.NotificationManager
 import android.util.Log
+import app.batstats.battery.data.DataRetentionManager
 import app.batstats.battery.shizuku.BstatsCollector
 import app.batstats.battery.util.Notifier
 import app.batstats.battery.util.ShellRunner
@@ -20,7 +21,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 import java.util.concurrent.atomic.AtomicBoolean
@@ -37,6 +40,7 @@ class BatteryMonitorService : Service() {
     private val drainNotificationManager: DrainNotificationManager by inject()
     private val shellRunner: ShellRunner by inject()
     private val enhancedCollector: BstatsCollector by inject()
+    private val dataRetentionManager: DataRetentionManager by inject()
 
     private var useAdvancedNotification = false
 
@@ -59,6 +63,14 @@ class BatteryMonitorService : Service() {
 
         // Everything below only needs to run once per service lifetime.
         if (!started.compareAndSet(false, true)) return START_STICKY
+
+        // Monitoring is exactly when the database grows, so it is also when it gets pruned.
+        serviceScope.launch {
+            while (isActive) {
+                dataRetentionManager.cleanupIfDue()
+                delay(DataRetentionManager.CLEANUP_INTERVAL_MS)
+            }
+        }
 
         serviceScope.launch {
             val settings = BatteryGraph.settings.flow.first()

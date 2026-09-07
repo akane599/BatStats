@@ -282,6 +282,23 @@ val AppSettings.monitoringIntervalMs: Long
         0 -> 5_000L; 1 -> 10_000L; 2 -> 30_000L; 3 -> 60_000L; 4 -> 300_000L; else -> 30_000L
     }
 
+/**
+ * How far back samples are kept, or null for "Forever". Indices track the Data Retention
+ * dropdown. An index that is out of range falls back to the declared default rather than
+ * to "Forever", so a corrupt value cannot quietly re-enable unbounded growth.
+ */
+val AppSettings.dataRetentionMs: Long?
+    get() = when (dataRetentionIndex) {
+        0 -> 7L * DAY_MS
+        1 -> 30L * DAY_MS
+        3 -> 180L * DAY_MS
+        4 -> 365L * DAY_MS
+        5 -> null
+        else -> 90L * DAY_MS
+    }
+
+private const val DAY_MS = 24 * 60 * 60 * 1000L
+
 val AppSettings.chartTimeRangeMs: Long
     get() = when (chartTimeRangeIndex) {
         0 -> 15 * 60 * 1000L; 1 -> 60 * 60 * 1000L; 2 -> 6 * 60 * 60 * 1000L

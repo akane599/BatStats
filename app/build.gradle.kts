@@ -23,6 +23,13 @@ kotlin {
     }
 }
 
+ksp {
+    // Room needs somewhere to put the schema it exports. Without this, exportSchema = true
+    // was inert: nothing described the database, so no migration could be written against
+    // it and every version bump had to fall back to wiping the data.
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 android {
     compileSdk = 37
 

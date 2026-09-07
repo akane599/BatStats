@@ -29,39 +29,38 @@ class DataViewModel(
         to: Long,
         includeSamples: Boolean,
         includeSessions: Boolean
+    ) = runOperation("JSON Exported Successfully", "Export Failed") {
+        exportImportManager.exportJson(uri, from, to, includeSamples, includeSessions)
+    }
+
+    fun exportCsv(uri: Uri, from: Long, to: Long) =
+        runOperation("CSV Exported Successfully", "Export Failed") {
+            exportImportManager.exportCsvToFolder(uri, from, to)
+        }
+
+    fun importJson(uri: Uri) = runOperation("JSON Imported Successfully", "Import Failed") {
+        exportImportManager.importJson(uri)
+    }
+
+    fun importCsv(uri: Uri) = runOperation("CSV Imported Successfully", "Import Failed") {
+        exportImportManager.importCsv(uri)
+    }
+
+    private fun runOperation(
+        successMessage: String,
+        failureMessage: String,
+        operation: suspend () -> Boolean
     ) {
+        // Set the guard before launching so repeated taps cannot overlap two restores.
+        if (_isBusy.value) return
+        _isBusy.value = true
+        _message.value = null
         viewModelScope.launch {
-            _isBusy.value = true
-            val success = exportImportManager.exportJson(uri, from, to, includeSamples, includeSessions)
-            _message.value = if (success) "JSON Exported Successfully" else "Export Failed"
-            _isBusy.value = false
-        }
-    }
-
-    fun exportCsv(uri: Uri, from: Long, to: Long) {
-        viewModelScope.launch {
-            _isBusy.value = true
-            val success = exportImportManager.exportCsvToFolder(uri, from, to)
-            _message.value = if (success) "CSV Exported Successfully" else "Export Failed"
-            _isBusy.value = false
-        }
-    }
-
-    fun importJson(uri: Uri) {
-        viewModelScope.launch {
-            _isBusy.value = true
-            val success = exportImportManager.importJson(uri)
-            _message.value = if (success) "JSON Imported Successfully" else "Import Failed"
-            _isBusy.value = false
-        }
-    }
-
-    fun importCsv(uri: Uri) {
-        viewModelScope.launch {
-            _isBusy.value = true
-            val success = exportImportManager.importCsv(uri)
-            _message.value = if (success) "CSV Imported Successfully" else "Import Failed"
-            _isBusy.value = false
+            try {
+                _message.value = if (operation()) successMessage else failureMessage
+            } finally {
+                _isBusy.value = false
+            }
         }
     }
 }

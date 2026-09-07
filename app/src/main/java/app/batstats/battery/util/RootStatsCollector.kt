@@ -313,7 +313,8 @@ object RootStatsCollector {
             }
 
             val out = p.inputStream.bufferedReader().use(BufferedReader::readText)
-            if (timedOut.get()) null else out
+            val exitCode = p.waitFor()
+            if (timedOut.get() || exitCode != 0) null else out
         } catch (e: Exception) {
             Log.d(TAG, "su failed for '$command': ${e.message}")
             null

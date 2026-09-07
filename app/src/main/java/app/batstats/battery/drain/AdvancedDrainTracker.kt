@@ -107,7 +107,7 @@ class AdvancedDrainTracker(
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     // Timestamp the boundary here so it is exact, but take the readings off
                     // the main thread - this fires on every screen unlock.
-                    val at = System.currentTimeMillis()
+                    val at = SystemClock.elapsedRealtime()
                     scope.launch {
                         advanceLedger(at)
                         updateDrainState()
@@ -161,7 +161,7 @@ class AdvancedDrainTracker(
 
         // Book whatever the final segment earned, then stop accruing.
         synchronized(ledgerLock) {
-            closeSegment(System.currentTimeMillis())
+            closeSegment(SystemClock.elapsedRealtime())
             openSegment = null
         }
         updateDrainState()
@@ -217,7 +217,7 @@ class AdvancedDrainTracker(
 
     /** One stretch of time during which the device stayed in a single state. */
     private class Segment(
-        val startedAt: Long,
+        val startedElapsedMs: Long,
         val startChargeMah: Double,
         /** Cumulative time the CPU had been suspended when this segment opened. */
         val startSleptMs: Long,
@@ -234,11 +234,11 @@ class AdvancedDrainTracker(
      * Closes the running segment and opens a fresh one from this instant. Called on every
      * state change and on every poll, so no segment ever spans a change of state.
      */
-    private fun advanceLedger(now: Long = System.currentTimeMillis()) {
+    private fun advanceLedger(now: Long = SystemClock.elapsedRealtime()) {
         synchronized(ledgerLock) {
             closeSegment(now)
             openSegment = Segment(
-                startedAt = now,
+                startedElapsedMs = now,
                 startChargeMah = getCurrentBatteryMah(),
                 startSleptMs = sleptSinceBootMs(),
                 screenOn = powerManager.isInteractive,
@@ -251,7 +251,7 @@ class AdvancedDrainTracker(
     /** Must hold [ledgerLock]. */
     private fun closeSegment(now: Long) {
         val segment = openSegment ?: return
-        val elapsed = now - segment.startedAt
+        val elapsed = now - segment.startedElapsedMs
         if (elapsed <= 0L) return
 
         // A segment that touched the charger tells us nothing about drain: the battery was
@@ -271,7 +271,7 @@ class AdvancedDrainTracker(
     private fun totalsIncludingOpenSegment(now: Long): DrainTotals = synchronized(ledgerLock) {
         val snapshot = totals.copy()
         val segment = openSegment ?: return snapshot
-        val elapsed = now - segment.startedAt
+        val elapsed = now - segment.startedElapsedMs
         if (elapsed <= 0L || segment.charging || isCharging()) return snapshot
 
         val slept = (sleptSinceBootMs() - segment.startSleptMs).coerceIn(0L, elapsed)
@@ -314,7 +314,8 @@ class AdvancedDrainTracker(
             BatteryCapacity.measuredMah(context)?.let { knownCapacityMah = it }
         }
 
-        val t = totalsIncludingOpenSegment(now)
+        // Duration accounting must not jump when the wall clock is corrected.
+        val t = totalsIncludingOpenSegment(SystemClock.elapsedRealtime())
 
         _drainState.value = DrainState(
             timestamp = now,

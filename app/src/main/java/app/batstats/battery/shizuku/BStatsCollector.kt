@@ -4,6 +4,7 @@ import android.util.Log
 import app.batstats.battery.data.db.AppEnergyDao
 import app.batstats.battery.util.ShellRunner
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -33,12 +34,17 @@ class BstatsCollector(
     fun start(pollSec: Long = 300L) {
         if (!running.compareAndSet(false, true)) return
         job = scope.launch {
+            val pollIntervalMs = pollSec.coerceIn(15L, 86_400L) * 1000L
+            var retryDelayMs = 15_000L
             while (isActive) {
                 try {
                     val result = shellRunner.run("dumpsys batterystats --checkin")
                     if (result == null) {
                         Log.w(TAG, "No privileged access for batterystats --checkin")
-                        delay(5_000)
+                        // Shizuku may be off for hours. Avoid dumping/probing every five
+                        // seconds for the whole outage, while retrying quickly at first.
+                        delay(retryDelayMs)
+                        retryDelayMs = (retryDelayMs * 2).coerceAtMost(pollIntervalMs)
                         continue
                     }
 
@@ -61,10 +67,13 @@ class BstatsCollector(
                         }
                     }
                     last = snap.perPackageMah
+                    retryDelayMs = 15_000L
+                } catch (ce: CancellationException) {
+                    throw ce
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in polling loop", e)
                 }
-                delay(pollSec * 1000L)
+                delay(pollIntervalMs)
             }
         }
     }

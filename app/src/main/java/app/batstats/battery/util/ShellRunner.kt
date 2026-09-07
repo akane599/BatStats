@@ -88,7 +88,8 @@ class ShellRunner(
                 Log.w(TAG, "Shizuku returned empty/error output for: $cmd")
                 lastFailure = Outcome.Failure(
                     Mode.SHIZUKU,
-                    if (out.isBlank()) "Shizuku returned no output" else out.take(200).trim()
+                    if (out.isBlank()) "Shizuku returned no output"
+                    else shellOutputError(out) ?: out.take(200).trim()
                 )
             }
 
@@ -151,8 +152,9 @@ class ShellRunner(
             }
 
             val out = p.inputStream.bufferedReader().use { it.readText() }
+            val exitCode = p.waitFor()
             when {
-                timedOut.get() -> null
+                timedOut.get() || exitCode != 0 -> null
                 // dumpsys exits 0 even when it refuses, so check the text as well.
                 out.contains("Permission Denial", ignoreCase = true) -> null
                 else -> out
@@ -167,7 +169,7 @@ class ShellRunner(
     }
 
     private fun isErrorOutput(out: String): Boolean =
-        out.startsWith("ERROR") || out.startsWith("Permission Denial", ignoreCase = true)
+        shellOutputError(out) != null
 
     /**
      * Detects the best available backend. Cached for [MODE_CACHE_MS] so a burst of commands

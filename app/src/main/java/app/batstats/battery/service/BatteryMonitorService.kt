@@ -49,25 +49,27 @@ class BatteryMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // An existing foreground service already satisfies the startup deadline. Reposting
+        // the placeholder here would replace its live notification with "Starting…".
+        if (!started.compareAndSet(false, true)) return START_STICKY
+
         // Go foreground straight away. The system only allows ~5 s between
         // startForegroundService() and startForeground(), and probing for
         // root/Shizuku/ADB below can easily take longer than that.
         if (!goForeground(Notifier.NOTIF_ID, Notifier.monitoringNotification(this, "Starting…"))) {
+            started.set(false)
             stopSelf()
             return START_NOT_STICKY
         }
-
-        // Everything below only needs to run once per service lifetime.
-        if (!started.compareAndSet(false, true)) return START_STICKY
 
         serviceScope.launch {
             val settings = BatteryGraph.settings.flow.first()
             useAdvancedNotification = settings.showDrainNotification
 
-            val hasAdvanced = shellRunner.hasAnyPrivilegedAccess()
-
             // Start sampling
             BatteryGraph.repo.startSampling()
+
+            val hasAdvanced = shellRunner.hasAnyPrivilegedAccess()
 
             // Auto-detect drain mode strategy
             if (hasAdvanced) {
@@ -128,7 +130,7 @@ class BatteryMonitorService : Service() {
 
     private fun goForeground(id: Int, notification: Notification): Boolean = try {
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            startForeground(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(id, notification)
         }
@@ -136,14 +138,6 @@ class BatteryMonitorService : Service() {
     } catch (t: Throwable) {
         Log.e(TAG, "startForeground failed", t)
         false
-    }
-
-    override fun onTimeout(startId: Int, fgsType: Int) {
-        if (Build.VERSION.SDK_INT >= 35 &&
-            (fgsType and ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) != 0
-        ) {
-            stopSelf()
-        }
     }
 
     override fun onDestroy() {

@@ -3,30 +3,36 @@ package app.batstats.battery.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import android.util.Log
 import app.batstats.battery.BatteryGraph
 import app.batstats.battery.util.Notifier
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class BootReceiver : BroadcastReceiver() {
-    @OptIn(DelicateCoroutinesApi::class)
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
 
-        Notifier.ensureChannel(context)
-        val repository = BatteryGraph.settings
-
-        GlobalScope.launch {
-            val config = repository.flow.first()
-            if (!config.autoStartOnBoot) return@launch
-
-            if (Build.VERSION.SDK_INT >= 35) {
-                Notifier.promptStartOnBoot(context)
-            } else {
-                context.startForegroundService(Intent(context, BatteryMonitorService::class.java))
+        val pending = goAsync()
+        val appContext = context.applicationContext
+        CoroutineScope(Dispatchers.IO).launch {
+            var autoStartEnabled = false
+            try {
+                // Keep the receiver alive while DataStore loads, within the broadcast budget.
+                val config = withTimeoutOrNull(5_000L) { BatteryGraph.settings.flow.first() }
+                    ?: return@launch
+                if (!config.autoStartOnBoot) return@launch
+                autoStartEnabled = true
+                appContext.startForegroundService(Intent(appContext, BatteryMonitorService::class.java))
+            } catch (e: Exception) {
+                Log.w("BootReceiver", "Could not start battery monitoring after boot", e)
+                // OEM background-start restrictions may still require a user tap.
+                if (autoStartEnabled) runCatching { Notifier.promptStartOnBoot(appContext) }
+            } finally {
+                pending.finish()
             }
         }
     }

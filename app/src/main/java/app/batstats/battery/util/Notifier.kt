@@ -34,17 +34,11 @@ object Notifier {
     fun promptStartOnBoot(ctx: Context) {
         ensureChannel(ctx)
         val startIntent = Intent(ctx, BatteryMonitorService::class.java)
-        val pi = if (Build.VERSION.SDK_INT >= 26) {
-            PendingIntent.getForegroundService(
-                ctx, 1, startIntent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-        } else {
-            PendingIntent.getService(
-                ctx, 1, startIntent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-        }
+        // minSdk is 26, so the pre-O getService branch was unreachable.
+        val pi = PendingIntent.getForegroundService(
+            ctx, 1, startIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         val n = NotificationCompat.Builder(ctx, CH_ID)
             .setContentTitle(ctx.getString(R.string.monitoring_ready))
             .setContentText(ctx.getString(R.string.tap_to_start))

@@ -35,19 +35,18 @@ class DrainNotificationManager(
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Drain Statistics",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows real-time battery drain statistics"
-                setShowBadge(false)
-                enableLights(false)
-                enableVibration(false)
-            }
-            notificationManager.createNotificationChannel(channel)
+        // Channels have existed since O and minSdk is 26, so this is unconditional.
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Drain Statistics",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Shows real-time battery drain statistics"
+            setShowBadge(false)
+            enableLights(false)
+            enableVibration(false)
         }
+        notificationManager.createNotificationChannel(channel)
     }
 
     fun startNotification() {

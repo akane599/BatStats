@@ -1,10 +1,17 @@
 package app.batstats.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.pager.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,31 +28,26 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.provider.Settings
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.ui.platform.LocalContext
+import app.batstats.R
 import app.batstats.battery.drain.formatBatteryPercent
 import app.batstats.battery.drain.formatMahWithPercent
 import app.batstats.battery.util.BatteryStatsParser
 import app.batstats.battery.util.RootStatsCollector
 import app.batstats.battery.util.ShellRunner
 import app.batstats.viewmodel.DetailedStatsViewModel
-import kotlinx.coroutines.launch
-import org.koin.androidx.compose.koinViewModel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.*
+import kotlinx.coroutines.launch
+import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -96,7 +98,7 @@ fun DetailedStatsScreen(
             LargeTopAppBar(
                 title = {
                     Column {
-                        Text("Detailed Stats")
+                        Text(stringResource(R.string.detailed_stats))
                         AnimatedVisibility(visible = lastRefresh > 0) {
                             val timeFormatter = remember(Locale.getDefault()) {
                                 DateTimeFormatter.ofPattern("HH:mm:ss", Locale.getDefault())
@@ -303,7 +305,7 @@ private fun AdbNameLimitNote(denied: Boolean, onRequestShizuku: () -> Unit) {
                 )
             }
             if (!denied) {
-                TextButton(onClick = onRequestShizuku) { Text("Grant") }
+                TextButton(onClick = onRequestShizuku) { Text(stringResource(R.string.grant)) }
             }
         }
     }
@@ -335,10 +337,10 @@ private fun PrivilegeRequiredCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.Security, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
                         Spacer(Modifier.width(12.dp))
-                        Text("Advanced Stats Required", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.advanced_stats_required), style = MaterialTheme.typography.titleMedium)
                     }
                     Text(
-                        "Detailed stats need one of: Shizuku, Root, or ADB-granted permissions (permanent, no service).",
+                        stringResource(R.string.advanced_stats_explanation),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -366,8 +368,8 @@ private fun PrivilegeRequiredCard(
                         Button(
                             onClick = onRequestShizuku,
                             enabled = shizukuRunning && !hasShizuku
-                        ) { Text("Request Shizuku") }
-                        OutlinedButton(onClick = onRecheck) { Text("Recheck") }
+                        ) { Text(stringResource(R.string.request_shizuku)) }
+                        OutlinedButton(onClick = onRecheck) { Text(stringResource(R.string.recheck)) }
                     }
                 }
             }
@@ -378,12 +380,12 @@ private fun PrivilegeRequiredCard(
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Troubleshooting", style = MaterialTheme.typography.labelLarge)
-                    Text("- Enable Developer options, enable USB debugging.", style = MaterialTheme.typography.bodySmall)
-                    Text("- On Xiaomi/MIUI/HyperOS/OnePlus: also enable USB debugging (Security settings) / Disable permission monitoring, then reboot.", style = MaterialTheme.typography.bodySmall)
-                    Text("- Run: adb devices, accept prompt, run grant commands, then force-stop BatStats or reboot.", style = MaterialTheme.typography.bodySmall)
-                    Text("- Grant fails with Neither user 2000 nor current process has GRANT_RUNTIME_PERMISSIONS? Enable security settings above.", style = MaterialTheme.typography.bodySmall)
-                    Text("- Grants persist until uninstall. Use pm grant via root (su -c pm grant ...) as alternative.", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.troubleshooting), style = MaterialTheme.typography.labelLarge)
+                    Text(stringResource(R.string.troubleshooting_dev_options), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.troubleshooting_oem), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.troubleshooting_adb_run), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.troubleshooting_grant_fails), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.troubleshooting_persist), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -394,7 +396,15 @@ private fun PrivilegeRequiredCard(
 private fun StatusChip(label: String, granted: Boolean) {
     AssistChip(
         onClick = {},
-        label = { Text("$label: ${if (granted) "yes" else "no"}") },
+        label = {
+            Text(
+                stringResource(
+                    R.string.permission_state,
+                    label,
+                    stringResource(if (granted) R.string.yes else R.string.no)
+                )
+            )
+        },
         leadingIcon = {
             Icon(
                 if (granted) Icons.Filled.CheckCircle else Icons.Filled.Cancel,
@@ -421,15 +431,15 @@ private fun AdbGrantCard(context: Context) {
     )
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("ADB", style = MaterialTheme.typography.titleSmall)
-            Text("Run once via ADB, survives reboots and updates until uninstall. No need to keep Shizuku running.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.adb), style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.adb_description), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             commands.forEach { cmd ->
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(cmd, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()))
                     IconButton(onClick = {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         cm.setPrimaryClip(ClipData.newPlainText("adb", cmd))
-                    }) { Icon(Icons.Outlined.ContentCopy, "Copy", modifier = Modifier.size(18.dp)) }
+                    }) { Icon(Icons.Outlined.ContentCopy, stringResource(R.string.copy), modifier = Modifier.size(18.dp)) }
                 }
                 HorizontalDivider()
             }
@@ -437,10 +447,10 @@ private fun AdbGrantCard(context: Context) {
                 OutlinedButton(onClick = {
                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("adb", commands.joinToString("\n")))
-                }) { Text("Copy all") }
+                }) { Text(stringResource(R.string.copy_all)) }
                 TextButton(onClick = {
                     context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }) { Text("App info") }
+                }) { Text(stringResource(R.string.app_info)) }
             }
         }
     }
@@ -468,40 +478,40 @@ private fun OverviewTab(
 
 @Composable
 private fun SummaryCard(snapshot: BatteryStatsParser.FullSnapshot?) {
-    StatsCard(title = "Summary", icon = Icons.Outlined.Summarize) {
+    StatsCard(title = stringResource(R.string.summary), icon = Icons.Outlined.Summarize) {
         if (snapshot == null) {
-            Text("No data available", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_data_available), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             val hours = snapshot.batteryRealtimeMs / 3600000.0
             val screenHours = snapshot.screenOnTimeMs / 3600000.0
 
-            StatRow("Time on battery", String.format(Locale.getDefault(), "%.1f hours", hours))
-            StatRow("Screen on time", String.format(Locale.getDefault(), "%.1f hours", screenHours))
-            StatRow("Estimated capacity", "${snapshot.estimatedCapacityMah} mAh")
-            StatRow("Apps tracked", "${snapshot.apps.size}")
-            StatRow("Wakelocks", "${snapshot.wakelocks.size}")
-            StatRow("Kernel wakelocks", "${snapshot.kernelWakelocks.size}")
+            StatRow(stringResource(R.string.time_on_battery), String.format(Locale.getDefault(), "%.1f hours", hours))
+            StatRow(stringResource(R.string.screen_on_time), String.format(Locale.getDefault(), "%.1f hours", screenHours))
+            StatRow(stringResource(R.string.estimated_capacity), "${snapshot.estimatedCapacityMah} mAh")
+            StatRow(stringResource(R.string.apps_tracked), "${snapshot.apps.size}")
+            StatRow(stringResource(R.string.wakelocks), "${snapshot.wakelocks.size}")
+            StatRow(stringResource(R.string.kernel_wakelocks_row), "${snapshot.kernelWakelocks.size}")
         }
     }
 }
 
 @Composable
 private fun DischargeBreakdownCard(snapshot: BatteryStatsParser.FullSnapshot?) {
-    StatsCard(title = "Discharge Breakdown", icon = Icons.Outlined.BatteryAlert) {
+    StatsCard(title = stringResource(R.string.discharge_breakdown), icon = Icons.Outlined.BatteryAlert) {
         if (snapshot == null) {
-            Text("No data available", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_data_available), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 DischargeBox(
-                    label = "Screen On",
+                    label = stringResource(R.string.screen_on),
                     percent = snapshot.screenOnDischargePercent,
                     color = MaterialTheme.colorScheme.primary
                 )
                 DischargeBox(
-                    label = "Screen Off",
+                    label = stringResource(R.string.screen_off),
                     percent = snapshot.screenOffDischargePercent,
                     color = MaterialTheme.colorScheme.tertiary
                 )
@@ -534,9 +544,9 @@ private fun DischargeBox(label: String, percent: Float, color: Color) {
 
 @Composable
 private fun ScreenTimeCard(snapshot: BatteryStatsParser.FullSnapshot?) {
-    StatsCard(title = "Screen Time Analysis", icon = Icons.Outlined.Smartphone) {
+    StatsCard(title = stringResource(R.string.screen_time_analysis), icon = Icons.Outlined.Smartphone) {
         if (snapshot == null) {
-            Text("No data available", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_data_available), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             val totalMs = snapshot.batteryRealtimeMs.toFloat().coerceAtLeast(1f)
             val screenOnPercent = (snapshot.screenOnTimeMs / totalMs * 100)
@@ -547,7 +557,7 @@ private fun ScreenTimeCard(snapshot: BatteryStatsParser.FullSnapshot?) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Screen On", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.screen_on), style = MaterialTheme.typography.labelMedium)
                     LinearWavyProgressIndicator(
                         progress = { screenOnPercent / 100f },
                         modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
@@ -570,17 +580,17 @@ private fun ScreenTimeCard(snapshot: BatteryStatsParser.FullSnapshot?) {
                 snapshot.screenOffDischargePercent / ((snapshot.batteryRealtimeMs - snapshot.screenOnTimeMs) / 3600000.0)
             } else 0.0
 
-            StatRow("Drain/hour (screen on)", String.format(Locale.getDefault(), "%.2f%%", drainPerHourScreenOn))
-            StatRow("Drain/hour (screen off)", String.format(Locale.getDefault(), "%.2f%%", drainPerHourScreenOff))
+            StatRow(stringResource(R.string.drain_per_hour_screen_on), String.format(Locale.getDefault(), "%.2f%%", drainPerHourScreenOn))
+            StatRow(stringResource(R.string.drain_per_hour_screen_off), String.format(Locale.getDefault(), "%.2f%%", drainPerHourScreenOff))
         }
     }
 }
 
 @Composable
 private fun SignalQualityCard(snapshot: BatteryStatsParser.FullSnapshot?) {
-    StatsCard(title = "Signal Quality", icon = Icons.Outlined.SignalCellularAlt) {
+    StatsCard(title = stringResource(R.string.signal_quality), icon = Icons.Outlined.SignalCellularAlt) {
         if (snapshot == null || snapshot.signalStrength.isEmpty()) {
-            Text("No signal data available", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_signal_data), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             val signalLabels = listOf("None", "Poor", "Moderate", "Good", "Great")
             val colors = listOf(
@@ -591,7 +601,7 @@ private fun SignalQualityCard(snapshot: BatteryStatsParser.FullSnapshot?) {
                 MaterialTheme.colorScheme.primary
             )
 
-            Text("Mobile Signal", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.mobile_signal), style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(8.dp))
 
             snapshot.signalStrength.forEachIndexed { index, stat ->
@@ -621,7 +631,7 @@ private fun SignalQualityCard(snapshot: BatteryStatsParser.FullSnapshot?) {
 
             if (snapshot.wifiSignal.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
-                Text("WiFi Signal", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.wifi_signal), style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(8.dp))
 
                 snapshot.wifiSignal.forEachIndexed { index, stat ->
@@ -655,32 +665,32 @@ private fun SignalQualityCard(snapshot: BatteryStatsParser.FullSnapshot?) {
 
 @Composable
 private fun DozeStatsCard(doze: BatteryStatsParser.DozeStats?) {
-    StatsCard(title = "Doze Statistics", icon = Icons.Outlined.PowerSettingsNew) {
+    StatsCard(title = stringResource(R.string.doze_statistics), icon = Icons.Outlined.PowerSettingsNew) {
         if (doze == null) {
-            Text("No Doze data available", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_doze_data), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            StatRow("Deep Doze time", formatDuration(doze.deepIdleTimeMs))
-            StatRow("Deep Doze count", "${doze.deepIdleCount}")
-            StatRow("Light Doze time", formatDuration(doze.lightIdleTimeMs))
-            StatRow("Light Doze count", "${doze.lightIdleCount}")
-            StatRow("Maintenance windows", "${doze.maintenanceCount}")
-            StatRow("Maintenance time", formatDuration(doze.maintenanceTimeMs))
+            StatRow(stringResource(R.string.deep_doze_time), formatDuration(doze.deepIdleTimeMs))
+            StatRow(stringResource(R.string.deep_doze_count), "${doze.deepIdleCount}")
+            StatRow(stringResource(R.string.light_doze_time), formatDuration(doze.lightIdleTimeMs))
+            StatRow(stringResource(R.string.light_doze_count), "${doze.lightIdleCount}")
+            StatRow(stringResource(R.string.maintenance_windows), "${doze.maintenanceCount}")
+            StatRow(stringResource(R.string.maintenance_time), formatDuration(doze.maintenanceTimeMs))
         }
     }
 }
 
 @Composable
 private fun BluetoothCard(bluetooth: BatteryStatsParser.BluetoothStats?) {
-    StatsCard(title = "Bluetooth", icon = Icons.Outlined.Bluetooth) {
+    StatsCard(title = stringResource(R.string.bluetooth), icon = Icons.Outlined.Bluetooth) {
         if (bluetooth == null) {
-            Text("No Bluetooth data available", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_bluetooth_data), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            StatRow("Idle time", formatDuration(bluetooth.idleTimeMs))
-            StatRow("RX time", formatDuration(bluetooth.rxTimeMs))
-            StatRow("TX time", formatDuration(bluetooth.txTimeMs))
-            StatRow("Power usage", String.format(Locale.getDefault(), "%.2f mAh", bluetooth.powerMah))
+            StatRow(stringResource(R.string.idle_time), formatDuration(bluetooth.idleTimeMs))
+            StatRow(stringResource(R.string.rx_time), formatDuration(bluetooth.rxTimeMs))
+            StatRow(stringResource(R.string.tx_time), formatDuration(bluetooth.txTimeMs))
+            StatRow(stringResource(R.string.power_usage), String.format(Locale.getDefault(), "%.2f mAh", bluetooth.powerMah))
             if (bluetooth.scanTimeMs > 0) {
-                StatRow("Scan time", formatDuration(bluetooth.scanTimeMs))
+                StatRow(stringResource(R.string.scan_time), formatDuration(bluetooth.scanTimeMs))
             }
         }
     }
@@ -691,31 +701,33 @@ private fun CurrentStateCard(
     deviceIdle: BatteryStatsParser.DeviceIdleInfo?,
     powerManager: BatteryStatsParser.PowerManagerInfo?
 ) {
-    StatsCard(title = "Current State", icon = Icons.Outlined.Info) {
+    StatsCard(title = stringResource(R.string.current_state), icon = Icons.Outlined.Info) {
         if (deviceIdle != null) {
-            StatRow("Doze state", deviceIdle.currentState)
-            StatRow("Light state", deviceIdle.lightState)
-            StatRow("Deep Doze enabled", if (deviceIdle.deepEnabled) "Yes" else "No")
-            StatRow("Light Doze enabled", if (deviceIdle.lightEnabled) "Yes" else "No")
+            StatRow(stringResource(R.string.doze_state), deviceIdle.currentState)
+            StatRow(stringResource(R.string.light_state), deviceIdle.lightState)
+            StatRow(stringResource(R.string.deep_doze_enabled), stringResource(if (deviceIdle.deepEnabled) R.string.yes else R.string.no))
+            StatRow(stringResource(R.string.light_doze_enabled), stringResource(if (deviceIdle.lightEnabled) R.string.yes else R.string.no))
         }
 
         if (powerManager != null) {
             Spacer(Modifier.height(8.dp))
-            StatRow("Screen", if (powerManager.isScreenOn) "On" else "Off")
-            StatRow("Battery level", "${powerManager.batteryLevel}%")
-            StatRow("Battery status", powerManager.batteryStatus)
-            StatRow("Low power mode", if (powerManager.lowPowerMode) "Yes" else "No")
-            StatRow("Device idle mode", powerManager.deviceIdleMode)
+            StatRow(stringResource(R.string.screen), stringResource(if (powerManager.isScreenOn) R.string.on else R.string.off))
+            StatRow(stringResource(R.string.battery_level_label), "${powerManager.batteryLevel}%")
+            StatRow(stringResource(R.string.battery_status), powerManager.batteryStatus)
+            StatRow(stringResource(R.string.low_power_mode), stringResource(if (powerManager.lowPowerMode) R.string.yes else R.string.no))
+            StatRow(stringResource(R.string.device_idle_mode), powerManager.deviceIdleMode)
 
             if (powerManager.holdingWakeLocks.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Text("Active wake locks: ${powerManager.holdingWakeLocks.size}",
-                    style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.active_wakelocks, powerManager.holdingWakeLocks.size),
+                    style = MaterialTheme.typography.labelMedium
+                )
             }
         }
 
         if (deviceIdle == null && powerManager == null) {
-            Text("No state data available", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_state_data), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -756,7 +768,7 @@ private fun AppsTab(apps: List<BatteryStatsParser.AppPowerStats>, capacityMah: D
             FilterChip(
                 selected = showSystemApps,
                 onClick = { showSystemApps = !showSystemApps },
-                label = { Text("System apps") }
+                label = { Text(stringResource(R.string.system_apps)) }
             )
 
             Spacer(Modifier.weight(1f))
@@ -768,7 +780,7 @@ private fun AppsTab(apps: List<BatteryStatsParser.AppPowerStats>, capacityMah: D
             ) {
                 AssistChip(
                     onClick = { expanded = true },
-                    label = { Text("Sort: ${sortBy.label}") },
+                    label = { Text(stringResource(R.string.sort_by, sortBy.label)) },
                     trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
                     modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                 )
@@ -795,7 +807,7 @@ private fun AppsTab(apps: List<BatteryStatsParser.AppPowerStats>, capacityMah: D
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text("No apps found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.no_apps_found), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(
@@ -906,8 +918,8 @@ private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats, capac
                         "WiFi TX" to app.wifiTxBytes
                     ).filter { it.second > 0L }
 
-                    Text("Power Breakdown", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    StatRow("Total", formatMahWithPercent(app.powerMah, capacityMah))
+                    Text(stringResource(R.string.power_breakdown), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    StatRow(stringResource(R.string.total), formatMahWithPercent(app.powerMah, capacityMah))
                     // Android attributes an app's drain by process state, not by component.
                     app.powerByState.forEach { state ->
                         val percent = formatBatteryPercent(state.powerMah, capacityMah)
@@ -931,13 +943,13 @@ private fun AppStatsCard(rank: Int, app: BatteryStatsParser.AppPowerStats, capac
 
                     if (timeRows.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
-                        Text("Time Usage", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.time_usage), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                         timeRows.forEach { (label, ms) -> StatRow(label, formatDuration(ms)) }
                     }
 
                     if (networkRows.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
-                        Text("Network", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.network), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                         networkRows.forEach { (label, bytes) -> StatRow(label, formatBytes(bytes)) }
                     }
                 }
@@ -963,12 +975,12 @@ private fun WakelocksTab(
             FilterChip(
                 selected = !showKernel,
                 onClick = { showKernel = false },
-                label = { Text("App wakelocks (${wakelocks.size})") }
+                label = { Text(stringResource(R.string.app_wakelocks, wakelocks.size)) }
             )
             FilterChip(
                 selected = showKernel,
                 onClick = { showKernel = true },
-                label = { Text("Kernel (${kernelWakelocks.size})") }
+                label = { Text(stringResource(R.string.kernel_wakelocks_count, kernelWakelocks.size)) }
             )
         }
 
@@ -979,7 +991,7 @@ private fun WakelocksTab(
             if (showKernel) {
                 if (kernelWakelocks.isEmpty()) {
                     item {
-                        Text("No kernel wakelocks found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.no_kernel_wakelocks), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     items(kernelWakelocks, key = { it.name }) { wl ->
@@ -989,7 +1001,7 @@ private fun WakelocksTab(
             } else {
                 if (wakelocks.isEmpty()) {
                     item {
-                        Text("No app wakelocks found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.no_app_wakelocks), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     items(wakelocks, key = { "${it.uid}_${it.tag}" }) { wl ->
@@ -1038,11 +1050,11 @@ private fun WakelockCard(wl: BatteryStatsParser.WakelockStats) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text("Count", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.count), style = MaterialTheme.typography.labelSmall)
                     Text("${wl.count}", style = MaterialTheme.typography.bodyMedium)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("Total time", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.total_time), style = MaterialTheme.typography.labelSmall)
                     Text(formatDuration(wl.totalTimeMs), style = MaterialTheme.typography.bodyMedium)
                 }
             }
@@ -1068,15 +1080,15 @@ private fun KernelWakelockCard(wl: BatteryStatsParser.KernelWakelockStats) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text("Count", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.count), style = MaterialTheme.typography.labelSmall)
                     Text("${wl.count}", style = MaterialTheme.typography.bodyMedium)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Active", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.active), style = MaterialTheme.typography.labelSmall)
                     Text("${wl.activeCount}", style = MaterialTheme.typography.bodyMedium)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("Total time", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.total_time), style = MaterialTheme.typography.labelSmall)
                     Text(formatDuration(wl.totalTimeMs), style = MaterialTheme.typography.bodyMedium)
                 }
             }
@@ -1116,7 +1128,7 @@ private fun NetworkTab(network: List<BatteryStatsParser.NetworkStats>) {
 
         if (sorted.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No network data available", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.no_network_data), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(
@@ -1155,14 +1167,14 @@ private fun NetworkCard(net: BatteryStatsParser.NetworkStats) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text("Mobile", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.mobile), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     Text(
                         "↓ ${formatBytes(net.mobileRxBytes)}  ↑ ${formatBytes(net.mobileTxBytes)}",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("WiFi", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+                    Text(stringResource(R.string.wifi), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
                     Text(
                         "↓ ${formatBytes(net.wifiRxBytes)}  ↑ ${formatBytes(net.wifiTxBytes)}",
                         style = MaterialTheme.typography.bodySmall
@@ -1186,17 +1198,17 @@ private fun AlarmsJobsTab(
             Tab(
                 selected = selected == 0,
                 onClick = { selected = 0 },
-                text = { Text("Alarms (${alarms.size})") }
+                text = { Text(stringResource(R.string.alarms_count, alarms.size)) }
             )
             Tab(
                 selected = selected == 1,
                 onClick = { selected = 1 },
-                text = { Text("Jobs (${jobs.size})") }
+                text = { Text(stringResource(R.string.jobs, jobs.size)) }
             )
             Tab(
                 selected = selected == 2,
                 onClick = { selected = 2 },
-                text = { Text("Syncs (${syncs.size})") }
+                text = { Text(stringResource(R.string.syncs, syncs.size)) }
             )
         }
 
@@ -1304,9 +1316,9 @@ private fun SystemTab(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            StatsCard(title = "Process Statistics", icon = Icons.Outlined.Memory) {
+            StatsCard(title = stringResource(R.string.process_statistics), icon = Icons.Outlined.Memory) {
                 if (snapshot?.processStats.isNullOrEmpty()) {
-                    Text("No process data", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.no_process_data), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     snapshot.processStats.take(20).forEach { proc ->
                         Row(
@@ -1331,9 +1343,9 @@ private fun SystemTab(
         }
 
         item {
-            StatsCard(title = "Sensor Usage", icon = Icons.Outlined.Sensors) {
+            StatsCard(title = stringResource(R.string.sensor_usage), icon = Icons.Outlined.Sensors) {
                 if (snapshot?.sensors.isNullOrEmpty()) {
-                    Text("No sensor data", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.no_sensor_data), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     snapshot.sensors.take(15).forEach { sensor ->
                         Row(
@@ -1367,9 +1379,9 @@ private fun SystemTab(
         }
 
         item {
-            StatsCard(title = "Doze Whitelist", icon = Icons.Outlined.BatteryChargingFull) {
+            StatsCard(title = stringResource(R.string.doze_whitelist), icon = Icons.Outlined.BatteryChargingFull) {
                 if (deviceIdle == null) {
-                    Text("No whitelist data", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.no_whitelist), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     Text(
                         "Whitelisted apps: ${deviceIdle.whitelistedApps.size}",
@@ -1415,9 +1427,9 @@ private fun SystemTab(
         }
 
         item {
-            StatsCard(title = "Suspend Blockers", icon = Icons.Outlined.Block) {
+            StatsCard(title = stringResource(R.string.suspend_blockers), icon = Icons.Outlined.Block) {
                 if (powerManager?.suspendBlockers.isNullOrEmpty()) {
-                    Text("No suspend blockers active", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.no_suspend_blockers), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     powerManager.suspendBlockers.forEach { blocker ->
                         Text(
@@ -1490,7 +1502,7 @@ private fun RootTab(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Root-only features:", style = MaterialTheme.typography.labelMedium)
+                            Text(stringResource(R.string.root_only), style = MaterialTheme.typography.labelMedium)
                             Spacer(Modifier.height(4.dp))
                             listOf(
                                 "Battery cycle count",
@@ -1583,9 +1595,9 @@ private fun RootTab(
 
 @Composable
 private fun BatteryHealthCard(battery: RootStatsCollector.KernelBatteryInfo?) {
-    StatsCard(title = "Battery Health (Kernel)", icon = Icons.Outlined.BatteryFull) {
+    StatsCard(title = stringResource(R.string.battery_health), icon = Icons.Outlined.BatteryFull) {
         if (battery == null) {
-            Text("Could not read battery info from /sys", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_battery_info), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             // Cycle count with visual indicator
             battery.cycleCount?.let { cycles ->
@@ -1595,7 +1607,7 @@ private fun BatteryHealthCard(battery: RootStatsCollector.KernelBatteryInfo?) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("Cycle Count", style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.cycle_count), style = MaterialTheme.typography.labelMedium)
                         Text(
                             "$cycles cycles",
                             style = MaterialTheme.typography.titleLarge,
@@ -1632,7 +1644,7 @@ private fun BatteryHealthCard(battery: RootStatsCollector.KernelBatteryInfo?) {
                 val actualMah = battery.chargeFull / 1000
                 val healthPct = battery.batteryAge ?: 0.0
 
-                Text("Capacity", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.capacity), style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.height(4.dp))
 
                 Row(
@@ -1640,15 +1652,15 @@ private fun BatteryHealthCard(battery: RootStatsCollector.KernelBatteryInfo?) {
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("Design", style = MaterialTheme.typography.labelSmall)
+                        Text(stringResource(R.string.design), style = MaterialTheme.typography.labelSmall)
                         Text("$designMah mAh", style = MaterialTheme.typography.bodyMedium)
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Current", style = MaterialTheme.typography.labelSmall)
+                        Text(stringResource(R.string.current), style = MaterialTheme.typography.labelSmall)
                         Text("$actualMah mAh", style = MaterialTheme.typography.bodyMedium)
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("Health", style = MaterialTheme.typography.labelSmall)
+                        Text(stringResource(R.string.health), style = MaterialTheme.typography.labelSmall)
                         Text(
                             String.format(Locale.getDefault(), "%.1f%%", healthPct),
                             style = MaterialTheme.typography.bodyMedium,
@@ -1676,23 +1688,23 @@ private fun BatteryHealthCard(battery: RootStatsCollector.KernelBatteryInfo?) {
             }
 
             // Other stats
-            battery.technology?.let { StatRow("Technology", it) }
-            battery.health?.let { StatRow("Health status", it) }
-            battery.status?.let { StatRow("Status", it) }
+            battery.technology?.let { StatRow(stringResource(R.string.technology), it) }
+            battery.health?.let { StatRow(stringResource(R.string.health_status), it) }
+            battery.status?.let { StatRow(stringResource(R.string.status), it) }
             battery.currentNow?.let {
-                StatRow("Current (kernel)", "${it / 1000} mA")
+                StatRow(stringResource(R.string.current_kernel), "${it / 1000} mA")
             }
             battery.voltageNow?.let {
-                StatRow("Voltage (kernel)", "${it / 1000} mV")
+                StatRow(stringResource(R.string.voltage_kernel), "${it / 1000} mV")
             }
             battery.tempNow?.let {
-                StatRow("Temperature", String.format(Locale.getDefault(), "%.1f °C", it / 10.0))
+                StatRow(stringResource(R.string.temperature), String.format(Locale.getDefault(), "%.1f °C", it / 10.0))
             }
             battery.timeToEmptyNow?.let {
-                if (it > 0) StatRow("Time to empty", formatDuration(it * 1000))
+                if (it > 0) StatRow(stringResource(R.string.time_to_empty), formatDuration(it * 1000))
             }
             battery.timeToFullNow?.let {
-                if (it > 0) StatRow("Time to full", formatDuration(it * 1000))
+                if (it > 0) StatRow(stringResource(R.string.time_to_full), formatDuration(it * 1000))
             }
         }
     }
@@ -1700,9 +1712,9 @@ private fun BatteryHealthCard(battery: RootStatsCollector.KernelBatteryInfo?) {
 
 @Composable
 private fun CpuFrequencyCard(cpuInfo: List<RootStatsCollector.CpuInfo>) {
-    StatsCard(title = "CPU Frequency", icon = Icons.Outlined.Speed) {
+    StatsCard(title = stringResource(R.string.cpu_frequency), icon = Icons.Outlined.Speed) {
         if (cpuInfo.isEmpty()) {
-            Text("Could not read CPU info", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_cpu_info), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             cpuInfo.forEach { cpu ->
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -1736,7 +1748,7 @@ private fun CpuFrequencyCard(cpuInfo: List<RootStatsCollector.CpuInfo>) {
                     // Time in state visualization
                     if (cpu.timeInState.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
-                        Text("Time in State", style = MaterialTheme.typography.labelSmall)
+                        Text(stringResource(R.string.time_in_state), style = MaterialTheme.typography.labelSmall)
                         Spacer(Modifier.height(4.dp))
 
                         val totalTime = cpu.timeInState.values.sum().toFloat().coerceAtLeast(1f)
@@ -1780,9 +1792,9 @@ private fun CpuFrequencyCard(cpuInfo: List<RootStatsCollector.CpuInfo>) {
 
 @Composable
 private fun ThermalZonesCard(thermalZones: List<RootStatsCollector.ThermalZone>) {
-    StatsCard(title = "Thermal Zones", icon = Icons.Outlined.Thermostat) {
+    StatsCard(title = stringResource(R.string.thermal_zones), icon = Icons.Outlined.Thermostat) {
         if (thermalZones.isEmpty()) {
-            Text("Could not read thermal zones", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.no_thermal_data), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             thermalZones.forEach { zone ->
                 val tempC = zone.tempMilliC / 1000.0
@@ -1845,7 +1857,7 @@ private fun ThermalZonesCard(thermalZones: List<RootStatsCollector.ThermalZone>)
 
 @Composable
 private fun KernelWakelocksCard(wakelocks: List<RootStatsCollector.KernelWakelockInfo>) {
-    StatsCard(title = "Kernel Wakelocks (Native)", icon = Icons.Outlined.Lock) {
+    StatsCard(title = stringResource(R.string.kernel_wakelocks), icon = Icons.Outlined.Lock) {
         if (wakelocks.isEmpty()) {
             Text(
                 "Could not read kernel wakelocks.",

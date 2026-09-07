@@ -171,4 +171,9 @@
     <string name="notify_temp_exceeds">Notify when temperature exceeds</string>
     <string name="high_battery_value">High Battery (%)</string>
     <string name="notify_draining_above"><![CDATA[Notify when draining > %1$d mA]]></string>
+
+    <!-- Home screen widgets -->
+    <string name="widget_battery">Battery</string>
+    <string name="widget_temperature">Temperature</string>
+    <string name="widget_eta">ETA</string>
 </resources>

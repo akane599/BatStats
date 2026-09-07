@@ -19,6 +19,7 @@ import app.batstats.battery.util.Notifier
 import app.batstats.battery.util.ShellRunner
 import app.batstats.battery.util.TimeEstimator
 import app.batstats.battery.widget.WidgetUpdater
+import app.batstats.settings.useFahrenheit
 import app.batstats.insights.ForegroundDrainTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +48,9 @@ class BatteryMonitorService : Service() {
 
     private var useAdvancedNotification = false
 
+    /** Tracked live so the widgets follow a unit change without waiting for a restart. */
+    @Volatile private var useFahrenheit = false
+
     /** onStartCommand can fire repeatedly (START_STICKY restarts, re-issued intents). */
     private val started = AtomicBoolean(false)
 
@@ -73,6 +77,10 @@ class BatteryMonitorService : Service() {
                 dataRetentionManager.cleanupIfDue()
                 delay(DataRetentionManager.CLEANUP_INTERVAL_MS)
             }
+        }
+
+        serviceScope.launch {
+            BatteryGraph.settings.flow.collect { useFahrenheit = it.useFahrenheit }
         }
 
         serviceScope.launch {
@@ -120,7 +128,9 @@ class BatteryMonitorService : Service() {
             // Update notification and widgets
             BatteryGraph.repo.realtimeFlow.collect { rt ->
                 // Always update widgets
-                rt.sample?.let { WidgetUpdater.push(this@BatteryMonitorService, it) }
+                rt.sample?.let {
+                    WidgetUpdater.push(this@BatteryMonitorService, it, useFahrenheit)
+                }
 
                 // Update standard notification if not using advanced
                 if (!useAdvancedNotification || !hasAdvanced) {
@@ -179,6 +189,9 @@ class BatteryMonitorService : Service() {
         enhancedCollector.stop()
         drainNotificationManager.stopNotification()
         serviceScope.cancel()
+        // Stopping monitoring is exactly when widgets start going stale, so hand them one
+        // last refresh from the system rather than leaving them on our final live push.
+        WidgetUpdater.requestRefresh(this)
         super.onDestroy()
     }
 

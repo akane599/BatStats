@@ -4,12 +4,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.BatteryManager
 import app.batstats.battery.data.db.BatteryDatabase
 import app.batstats.battery.data.db.BatterySample
 import app.batstats.battery.data.db.ChargeSession
 import app.batstats.battery.data.db.SessionType
 import app.batstats.battery.util.BatteryCapacity
+import app.batstats.battery.util.BatteryReader
 import app.batstats.settings.AppSettings
 import app.batstats.settings.monitoringIntervalMs
 import io.github.mlmgames.settings.core.SettingsRepository
@@ -32,7 +32,6 @@ class BatteryRepository(
 ) {
     private val batteryDao = db.batteryDao()
     val sessionDao = db.sessionDao()
-    private val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
 
     // Settings flows
     val monitoringInterval: Flow<Long> = settingsRepository.flow.map { it.monitoringIntervalMs }
@@ -219,49 +218,23 @@ class BatteryRepository(
     }
 
     private fun processBatteryState(intent: Intent, persist: Boolean = false) {
-        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-        val levelPercent = if (level >= 0 && scale > 0) (level * 100) / scale else 0
-
-        val pluggedState = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
-        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN)
-        val voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0) // mV
-        val temperature = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) // tenths of a degree C
-        val health = intent.getIntExtra(BatteryManager.EXTRA_HEALTH, BatteryManager.BATTERY_HEALTH_UNKNOWN)
-
-        // Get Instantaneous Current (MicroAmperes)
-        // This property is not in the intent, must be queried from manager
-        var currentNow = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-
-        // Some devices report average instead of instantaneous
-        if (currentNow == 0L || currentNow == Long.MIN_VALUE) {
-            currentNow = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
-        }
+        // Shared with the widgets, which read the same sticky broadcast without a service.
+        val sample = BatteryReader.sampleFrom(context, intent)
+        val pluggedState = sample.plugged
+        val currentNow = sample.currentNowUa ?: 0L
+        val voltage = sample.voltageMv ?: 0
 
         // Calculate Power (mW) = (uA * mV) / 1,000,000
         val powerMw = (abs(currentNow) * voltage) / 1_000_000f
 
-        val sample = BatterySample(
-            timestamp = System.currentTimeMillis(),
-            levelPercent = levelPercent,
-            status = status,
-            plugged = pluggedState,
-            currentNowUa = currentNow,
-            chargeCounterUah = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER),
-            voltageMv = voltage,
-            temperatureDeciC = temperature,
-            health = health,
-            screenOn = isScreenOn()
-        )
-
         // Update StateFlow for UI
         _realtime.value = Realtime(
-            level = levelPercent,
+            level = sample.levelPercent,
             plugged = pluggedState,
             currentMa = (currentNow / 1000).toInt(),
             voltageMv = voltage,
             powerMw = powerMw,
-            temperatureC = temperature / 10f,
+            temperatureC = (sample.temperatureDeciC ?: 0) / 10f,
             sample = sample
         )
 
@@ -286,11 +259,6 @@ class BatteryRepository(
                 }
             }
         }
-    }
-
-    private fun isScreenOn(): Boolean {
-        val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-        return pm.isInteractive
     }
 
     data class Realtime(

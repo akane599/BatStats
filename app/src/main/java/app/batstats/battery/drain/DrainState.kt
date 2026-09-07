@@ -179,3 +179,26 @@ fun formatDrainRateWithPercent(rate: Double, capacityMah: Double): String {
     val percent = formatBatteryPercentRate(rate, capacityMah)
     return if (percent.isEmpty()) value else "$value · $percent"
 }
+
+/**
+ * "1.1%/h" - the share of the battery per hour, falling back to plain mA where the capacity
+ * could not be established. For places with no room for both, like a notification line.
+ */
+fun formatDrainRatePreferPercent(rate: Double, capacityMah: Double): String {
+    val percent = formatBatteryPercentRate(rate, capacityMah)
+    return if (percent.isEmpty()) formatDrainRate(rate) else percent
+}
+
+/**
+ * An instantaneous current as a share of the battery per hour: "-4.1%/h" while discharging,
+ * "+12.3%/h" on the charger. The sign is what distinguishes the two at a glance, so it is
+ * always shown. Null when there is no capacity to measure against.
+ */
+fun formatLevelRatePerHour(currentMa: Int, capacityMah: Double?): String? {
+    if (capacityMah == null || capacityMah <= 0.0 || currentMa == 0) return null
+    return String.format(
+        java.util.Locale.getDefault(),
+        "%+.1f%%/h",
+        currentMa / capacityMah * 100.0
+    )
+}

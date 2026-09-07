@@ -11,10 +11,13 @@ import app.batstats.battery.drain.DrainNotificationManager
 import android.app.Notification
 import android.app.NotificationManager
 import android.util.Log
+import app.batstats.battery.data.BatteryRepository
 import app.batstats.battery.data.DataRetentionManager
+import app.batstats.battery.drain.formatLevelRatePerHour
 import app.batstats.battery.shizuku.BstatsCollector
 import app.batstats.battery.util.Notifier
 import app.batstats.battery.util.ShellRunner
+import app.batstats.battery.util.TimeEstimator
 import app.batstats.battery.widget.WidgetUpdater
 import app.batstats.insights.ForegroundDrainTracker
 import kotlinx.coroutines.CoroutineScope
@@ -121,12 +124,10 @@ class BatteryMonitorService : Service() {
 
                 // Update standard notification if not using advanced
                 if (!useAdvancedNotification || !hasAdvanced) {
-                    val text = if (rt.sample == null)
-                        "Waiting for battery data…"
-                    else
-                        "Level ${rt.level}% • ${rt.currentMa} mA • ${rt.voltageMv} mV"
-
-                    val running = Notifier.monitoringNotification(this@BatteryMonitorService, text)
+                    val running = Notifier.monitoringNotification(
+                        this@BatteryMonitorService,
+                        monitoringText(rt)
+                    )
                     try {
                         val nm = getSystemService(android.app.NotificationManager::class.java)
                         nm.notify(Notifier.NOTIF_ID, running)
@@ -136,6 +137,18 @@ class BatteryMonitorService : Service() {
         }
 
         return START_STICKY
+    }
+
+    /**
+     * The rate of change is shown as a share of the battery per hour rather than in mA: a
+     * phone pulling 780 mA tells you little on its own, "-4.1%/h" tells you how long you
+     * have. Devices whose capacity we cannot establish keep the mA reading.
+     */
+    private fun monitoringText(rt: BatteryRepository.Realtime): String {
+        val sample = rt.sample ?: return "Waiting for battery data…"
+        val capacity = TimeEstimator.capacityMahFor(sample)
+        val rate = formatLevelRatePerHour(rt.currentMa, capacity) ?: "${rt.currentMa} mA"
+        return "Level ${rt.level}% • $rate • ${rt.voltageMv} mV"
     }
 
     private fun goForeground(id: Int, notification: Notification): Boolean = try {

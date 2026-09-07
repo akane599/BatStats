@@ -73,6 +73,28 @@ class DrainFormatTest {
     }
 
     @Test
+    fun `a notification rate drops the mA and keeps the share`() {
+        assertEquals("5.0%/h", formatDrainRatePreferPercent(250.0, 5000.0))
+        // Without a capacity there is no share to show, so the mA reading stays.
+        assertEquals("250 mA", formatDrainRatePreferPercent(250.0, 0.0))
+        assertEquals("—", formatDrainRatePreferPercent(0.0, 5000.0))
+    }
+
+    @Test
+    fun `the level rate is signed so charging and draining are distinguishable`() {
+        assertEquals("-15.6%/h", formatLevelRatePerHour(-780, 5000.0))
+        assertEquals("+30.0%/h", formatLevelRatePerHour(1500, 5000.0))
+    }
+
+    @Test
+    fun `the level rate is withheld without a capacity to measure against`() {
+        assertEquals(null, formatLevelRatePerHour(-780, null))
+        assertEquals(null, formatLevelRatePerHour(-780, 0.0))
+        // No current is not a rate either way.
+        assertEquals(null, formatLevelRatePerHour(0, 5000.0))
+    }
+
+    @Test
     fun `capacity is only accepted when it could be a real battery`() {
         assertEquals(true, app.batstats.battery.util.BatteryCapacity.isPlausible(5000.0))
         assertEquals(false, app.batstats.battery.util.BatteryCapacity.isPlausible(0.0))

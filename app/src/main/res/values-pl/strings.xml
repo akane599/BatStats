@@ -68,7 +68,6 @@
     <string name="show_persistent_notification">Show Persistent Notification</string>
     <string name="show_drain_notification">Show Drain Stats Notification</string>
     <string name="notification_style">Notification Style</string>
-    <string name="track_foreground_apps">Track Foreground Apps</string>
     <string name="low_battery_alert">Low Battery Alert</string>
     <string name="low_battery_threshold">Low Battery Threshold</string>
     <string name="high_battery_alert">High Battery Alert</string>
@@ -88,8 +87,6 @@
     <string name="compact_stats_view">Compact Stats View</string>
     <string name="data_retention">Data Retention</string>
     <string name="auto_cleanup">Auto-cleanup Old Data</string>
-    <string name="export_format">Export Format</string>
-    <string name="include_raw_samples">Include Raw Samples</string>
 
     <string name="monitoring_ready">Monitoring ready</string>
     <string name="start_monitoring">Start monitoring</string>
@@ -278,4 +275,9 @@
     <string name="alert_low_battery_body">%1$d%% remaining — time to charge.</string>
     <string name="alert_charging_complete">Charging complete</string>
     <string name="alert_charging_complete_body">Charged to %1$d%%.</string>
+    <string name="collected_data">Collected data</string>
+    <string name="sample_count">%1$d samples</string>
+    <string name="collecting_since">Collecting since %1$s</string>
+    <string name="last_export">Last export %1$s</string>
+    <string name="never_exported">Never exported</string>
 </resources>

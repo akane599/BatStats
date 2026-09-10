@@ -9,18 +9,29 @@ import app.batstats.battery.util.DetailedStatsCollector
 import app.batstats.battery.util.PrivilegeChecker
 import app.batstats.battery.util.RootStatsCollector
 import app.batstats.battery.util.ShellRunner
+import app.batstats.settings.AppSettings
+import io.github.mlmgames.settings.core.SettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class DetailedStatsViewModel(
     private val collector: DetailedStatsCollector,
     private val shizukuBridge: ShizukuBridge,
     private val shellRunner: ShellRunner,
-    private val context: Context
+    private val context: Context,
+    settingsRepository: SettingsRepository<AppSettings>
 ) : ViewModel() {
+
+    /** "Compact Stats View": renders the cards densely. */
+    val compactView: StateFlow<Boolean> = settingsRepository.flow
+        .map { it.compactStatsView }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     // Forward flows from collector
     val snapshot = collector.snapshot

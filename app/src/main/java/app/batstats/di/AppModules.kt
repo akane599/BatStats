@@ -1,6 +1,8 @@
 package app.batstats.di
 
 import android.os.Build
+import app.batstats.battery.alerts.AlertNotifier
+import app.batstats.battery.alerts.BatteryAlertMonitor
 import app.batstats.battery.data.BatteryRepository
 import app.batstats.battery.data.DataRetentionManager
 import app.batstats.battery.data.ExportImportManager
@@ -97,6 +99,9 @@ val appModule = module {
 
     single { AdvancedDrainTracker(androidContext(), get(), get(), get(), get()) }
     single { DrainNotificationManager(androidContext(), get()) }
+
+    single { AlertNotifier(androidContext()) }
+    single { BatteryAlertMonitor(get(), get(), get(), get()) }
 
     viewModel { DashboardViewModel(androidApplication(), get(), get()) }
     viewModel { SettingsViewModel(androidContext(), get(), get(), get()) }

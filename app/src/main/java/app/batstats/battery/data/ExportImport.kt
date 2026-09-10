@@ -42,8 +42,10 @@ class ExportImportManager(
                 db.batteryDao().samplesBetween(if (from == 0L) 0L else from, toBound).first()
             } else emptyList()
 
+            // The date range applies here too. It used to be ignored for sessions, so a
+            // "last 7 days" export quietly carried every session ever recorded.
             val sessions = if (includeSessions) {
-                db.sessionDao().sessionsPaged(10_000, 0).first()
+                db.sessionDao().sessionsBetween(if (from == 0L) 0L else from, toBound)
             } else emptyList()
 
             out.use {
@@ -80,7 +82,9 @@ class ExportImportManager(
                 val f2 = dir.createFile("text/csv", "charge_sessions.csv") ?: return@withContext false
                 cr.openOutputStream(f2.uri)?.bufferedWriter()?.use { w ->
                     w.appendLine("sessionId,type,startTime,endTime,startLevel,endLevel,deltaUah,avgCurrentUa,estCapacityMah")
-                    db.sessionDao().sessionsPaged(10_000, 0).first().forEach { s ->
+                    db.sessionDao()
+                        .sessionsBetween(if (from == 0L) 0L else from, toBound)
+                        .forEach { s ->
                         w.appendLine("${s.sessionId},${s.type},${s.startTime},${s.endTime ?: ""},${s.startLevel},${s.endLevel ?: ""},${s.deltaUah ?: ""},${s.avgCurrentUa ?: ""},${s.estCapacityMah ?: ""}")
                     }
                 } ?: return@withContext false

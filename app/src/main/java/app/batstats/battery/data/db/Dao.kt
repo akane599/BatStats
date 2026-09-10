@@ -35,6 +35,14 @@ interface SessionDao {
     @Query("SELECT * FROM charge_sessions WHERE sessionId = :id")
     fun session(id: String): Flow<ChargeSession?>
 
+    /**
+     * Sessions that started within the window. Export used to pull every session ever
+     * recorded regardless of the date range the user picked, so the range silently applied
+     * to samples only.
+     */
+    @Query("SELECT * FROM charge_sessions WHERE startTime BETWEEN :from AND :to ORDER BY startTime DESC")
+    suspend fun sessionsBetween(from: Long, to: Long): List<ChargeSession>
+
     @Query("UPDATE charge_sessions SET endTime=:end, endLevel=:endLevel, deltaUah=:delta, avgCurrentUa=:avg, estCapacityMah=:cap WHERE sessionId=:id")
     suspend fun complete(id: String, end: Long, endLevel: Int, delta: Long?, avg: Long?, cap: Int?)
 }

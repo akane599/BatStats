@@ -267,4 +267,15 @@
     <string name="no_app_drain_explanation">Per-app drain is collected while monitoring runs. Give it an hour or two, then check back.</string>
     <string name="drain_source_measured">Measured from batterystats</string>
     <string name="drain_source_estimated">Estimated — grant Shizuku, root or ADB for measured figures</string>
+    <string name="channel_battery_monitor">Battery Monitor</string>
+    <string name="channel_battery_monitor_quiet">Battery Monitor (hidden)</string>
+    <string name="alert_channel_description">Low battery, temperature and charging alerts</string>
+    <string name="alert_channel_sound_vibrate">Alerts (sound and vibration)</string>
+    <string name="alert_channel_sound">Alerts (sound)</string>
+    <string name="alert_channel_vibrate">Alerts (vibration)</string>
+    <string name="alert_channel_silent">Alerts (silent)</string>
+    <string name="alert_low_battery">Battery low</string>
+    <string name="alert_low_battery_body">%1$d%% remaining — time to charge.</string>
+    <string name="alert_charging_complete">Charging complete</string>
+    <string name="alert_charging_complete_body">Charged to %1$d%%.</string>
 </resources>

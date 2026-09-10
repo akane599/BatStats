@@ -13,10 +13,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.batstats.R
+import app.batstats.viewmodel.DataSummary
 import app.batstats.viewmodel.DataViewModel
 import org.koin.androidx.compose.koinViewModel
 import java.time.Instant
@@ -90,6 +92,8 @@ fun DataScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            DataSummaryCard(vm.summary.collectAsStateWithLifecycle().value)
+
             ElevatedCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(stringResource(R.string.date_range), style = MaterialTheme.typography.titleMedium)
@@ -182,6 +186,51 @@ private fun DateRangeRow(from: Long, to: Long, onFrom: (Long) -> Unit, onTo: (Lo
             OutlinedButton(onClick = { onFrom(0L) }) { Text(stringResource(R.string.all)) }
             OutlinedButton(onClick = { onFrom(System.currentTimeMillis() - 7L * 24 * 3600000) }) { Text(stringResource(R.string.last_7_days)) }
             OutlinedButton(onClick = { onFrom(System.currentTimeMillis() - 30L * 24 * 3600000) }) { Text(stringResource(R.string.last_30_days)) }
+        }
+    }
+}
+
+/**
+ * What there is to export. Reads the three counters the app has always kept and never
+ * showed: when collecting started, how many samples that has produced, and the last export.
+ */
+@Composable
+private fun DataSummaryCard(summary: DataSummary) {
+    val locale = LocalConfiguration.current.locales[0]
+    val dateFormat = remember(locale) {
+        DateTimeFormatter.ofPattern("d MMM yyyy", locale)
+    }
+    fun format(ms: Long): String = Instant.ofEpochMilli(ms)
+        .atZone(ZoneId.systemDefault())
+        .format(dateFormat)
+
+    ElevatedCard {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                stringResource(R.string.collected_data),
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                stringResource(R.string.sample_count, summary.totalSamples),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (summary.collectingSince > 0L) {
+                Text(
+                    stringResource(R.string.collecting_since, format(summary.collectingSince)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                if (summary.lastExport > 0L) {
+                    stringResource(R.string.last_export, format(summary.lastExport))
+                } else {
+                    stringResource(R.string.never_exported)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

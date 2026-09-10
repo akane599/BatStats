@@ -7,9 +7,11 @@ to values/strings.xml without also appearing in values-<locale>/strings.xml. Thi
 English text across as a placeholder so the build stays green and translators have a row to
 work from.
 
-It only ever adds keys that are absent, so real translations are never overwritten. Strings
-marked translatable="false" are skipped, and non-locale qualifier folders (values-night,
-values-hdpi and friends) are left alone - a string does not vary by density or theme.
+It only ever adds keys that are absent, so real translations are never overwritten. Keys the
+default no longer has are pruned, because lint reports those as ExtraTranslation errors.
+Strings marked translatable="false" are skipped, and non-locale qualifier folders
+(values-night, values-hdpi and friends) are left alone - a string does not vary by density or
+theme.
 
     python3 tools/sync_translations.py [--check]
 
@@ -68,10 +70,9 @@ def main() -> int:
 
         present = set(string_names(target))
         missing = [name for name in translatable if name not in present]
-        # A key that is translatable="false" has no business in a locale file.
-        untranslatable = [
-            name for name in present if name in blocks and name not in translatable
-        ]
+        # A key that is translatable="false", or one the default has since dropped, has no
+        # business in a locale file - lint calls both of those an error.
+        untranslatable = [name for name in present if name not in translatable]
 
         if not missing and not untranslatable:
             continue
@@ -82,7 +83,7 @@ def main() -> int:
             if missing:
                 detail.append(f"{len(missing)} missing")
             if untranslatable:
-                detail.append(f"{len(untranslatable)} untranslatable")
+                detail.append(f"{len(untranslatable)} stale")
             print(f"{directory.name}: {', '.join(detail)}")
             continue
 

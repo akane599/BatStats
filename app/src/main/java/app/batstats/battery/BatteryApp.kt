@@ -24,6 +24,7 @@ class BatteryApp : Application() {
     private val migrationManager: MigrationManager by inject()
     private val shizukuBridge: ShizukuBridge by inject()
     private val dataRetentionManager: DataRetentionManager by inject()
+    private val settings: SettingsRepository<AppSettings> by inject()
 
     override fun onCreate() {
         super.onCreate()
@@ -47,6 +48,11 @@ class BatteryApp : Application() {
         // otherwise keep whatever it accumulated forever.
         appScope.launch {
             dataRetentionManager.cleanupIfDue()
+        }
+
+        // Stamped once, so the Data screen can say how long it has been collecting.
+        appScope.launch {
+            settings.update { if (it.firstLaunchTime == 0L) it.copy(firstLaunchTime = System.currentTimeMillis()) else it }
         }
     }
 }

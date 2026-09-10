@@ -257,29 +257,11 @@ data class AppSettings(
     )
     val autoCleanupEnabled: Boolean = true,
 
-    @Setting(
-        title = "Export Format",
-        category = Data::class,
-        type = Dropdown::class,
-        options = ["CSV", "JSON"],
-        key = "export_format_index"
-    )
-    val exportFormatIndex: Int = 0,
-
-    @Setting(
-        title = "Include Raw Samples",
-        category = Data::class,
-        type = Toggle::class,
-        key = "export_include_raw_samples"
-    )
-    val exportIncludeRawSamples: Boolean = false,
-
     // PERSISTED STATE
     @Persisted(key = "last_data_cleanup") val lastDataCleanup: Long = 0L,
     @Persisted(key = "last_export_time") val lastExportTime: Long = 0L,
     @Persisted(key = "total_samples_collected") val totalSamplesCollected: Long = 0L,
     @Persisted(key = "first_launch_time") @NoReset val firstLaunchTime: Long = 0L,
-    @Persisted(key = "has_seen_onboarding") @NoReset val hasSeenOnboarding: Boolean = false,
 )
 
 val AppSettings.monitoringIntervalMs: Long

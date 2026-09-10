@@ -49,11 +49,24 @@ import java.util.*
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun DetailedStatsScreen(
     onBack: () -> Unit,
     vm: DetailedStatsViewModel = koinViewModel()
+) {
+    // "Compact Stats View" reaches every StatsCard below through the composition rather than
+    // as a parameter threaded through fifteen call sites.
+    val compactView by vm.compactView.collectAsStateWithLifecycle()
+    CompositionLocalProvider(LocalCompactStats provides compactView) {
+        DetailedStatsContent(onBack, vm)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun DetailedStatsContent(
+    onBack: () -> Unit,
+    vm: DetailedStatsViewModel
 ) {
     val snapshot by vm.snapshot.collectAsStateWithLifecycle()
     val deviceIdle by vm.deviceIdle.collectAsStateWithLifecycle()
@@ -1905,22 +1918,26 @@ private fun StatsCard(
     icon: ImageVector,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    // Compact mode reaches the cards through a composition local rather than an extra
+    // parameter on all fifteen call sites.
+    val compact = LocalCompactStats.current
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(if (compact) 10.dp else 16.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 12.dp)
+                modifier = Modifier.padding(bottom = if (compact) 6.dp else 12.dp)
             ) {
                 Icon(
                     icon,
                     null,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(if (compact) 16.dp else 20.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = if (compact) MaterialTheme.typography.titleSmall
+                    else MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -1929,10 +1946,17 @@ private fun StatsCard(
     }
 }
 
+/**
+ * Whether the Detailed Stats cards render densely. Off by default so anything drawing a
+ * StatsCard outside the screen keeps the roomy layout.
+ */
+internal val LocalCompactStats = androidx.compose.runtime.compositionLocalOf { false }
+
 @Composable
 private fun StatRow(label: String, value: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth()
+            .padding(vertical = if (LocalCompactStats.current) 0.dp else 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(

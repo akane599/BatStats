@@ -51,18 +51,23 @@ data class AppSettings(
         category = General::class,
         type = Dropdown::class,
         options = ["Minimal", "Compact", "Detailed"],
-        dependsOn = "showNotification",
         key = "notification_style_index"
     )
     val notificationStyleIndex: Int = 1,
 
+    /**
+     * Was "Track Foreground Apps", which nothing read. It now controls the per-app drain
+     * collection that feeds the App Drain screen, and is independent of the monitoring
+     * toggle: the monitor can run without the five-minute batterystats dumps.
+     */
     @Setting(
-        title = "Track Foreground Apps",
+        title = "Collect Per-App Drain",
+        description = "Records which apps use power, for the App Drain screen. Polls batterystats every 5 minutes.",
         category = General::class,
         type = Toggle::class,
-        key = "track_foreground_apps"
+        key = "track_app_drain"
     )
-    val trackForegroundApps: Boolean = true,
+    val trackAppDrain: Boolean = true,
 
     @Setting(
         title = "Detailed Stats Interval",
@@ -303,6 +308,16 @@ val AppSettings.chartTimeRangeMs: Long
     get() = when (chartTimeRangeIndex) {
         0 -> 15 * 60 * 1000L; 1 -> 60 * 60 * 1000L; 2 -> 6 * 60 * 60 * 1000L
         3 -> 24 * 60 * 60 * 1000L; 4 -> 7 * 24 * 60 * 60 * 1000L; else -> 60 * 60 * 1000L
+    }
+
+enum class NotificationStyle { MINIMAL, COMPACT, DETAILED }
+
+/** Indices track the Notification Style dropdown. */
+val AppSettings.notificationStyle: NotificationStyle
+    get() = when (notificationStyleIndex) {
+        0 -> NotificationStyle.MINIMAL
+        2 -> NotificationStyle.DETAILED
+        else -> NotificationStyle.COMPACT
     }
 
 val AppSettings.useFahrenheit: Boolean get() = temperatureUnitIndex == 1

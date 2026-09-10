@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -41,6 +42,11 @@ class DashboardViewModel(
         )
 
     val realtime: StateFlow<BatteryRepository.Realtime> = repo.realtimeFlow
+
+    /** "Show Current in mA": off swaps the hero reading for a share of the battery per hour. */
+    val showCurrentInMa: StateFlow<Boolean> = settings
+        .map { it.showCurrentInMa }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val isMonitoring: StateFlow<Boolean> = repo.isMonitoringFlow
 
     val activeSession: StateFlow<ChargeSession?> = repo.activeSessionFlow

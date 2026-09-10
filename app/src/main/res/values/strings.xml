@@ -263,6 +263,21 @@
     <string name="avg_rate">Avg Rate</string>
     <string name="export_battery_data">Export Battery Data</string>
 
+    <!-- Notification channels -->
+    <string name="channel_battery_monitor">Battery Monitor</string>
+    <string name="channel_battery_monitor_quiet">Battery Monitor (hidden)</string>
+
+    <!-- Battery alerts -->
+    <string name="alert_channel_description">Low battery, temperature and charging alerts</string>
+    <string name="alert_channel_sound_vibrate">Alerts (sound and vibration)</string>
+    <string name="alert_channel_sound">Alerts (sound)</string>
+    <string name="alert_channel_vibrate">Alerts (vibration)</string>
+    <string name="alert_channel_silent">Alerts (silent)</string>
+    <string name="alert_low_battery">Battery low</string>
+    <string name="alert_low_battery_body">%1$d%% remaining — time to charge.</string>
+    <string name="alert_charging_complete">Charging complete</string>
+    <string name="alert_charging_complete_body">Charged to %1$d%%.</string>
+
     <!-- Navigation bar -->
     <string name="nav_battery">Battery</string>
     <string name="nav_apps">Apps</string>

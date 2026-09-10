@@ -100,6 +100,7 @@ import app.batstats.R
 import app.batstats.battery.data.BatteryRepository
 import app.batstats.battery.data.db.ChargeSession
 import app.batstats.battery.data.db.SessionType
+import app.batstats.battery.drain.formatLevelRatePerHour
 import app.batstats.battery.util.TimeEstimator
 import app.batstats.viewmodel.DashboardViewModel
 import java.time.Instant
@@ -118,6 +119,7 @@ fun DashboardScreen(
     val rt by vm.realtime.collectAsStateWithLifecycle()
     val session by vm.activeSession.collectAsStateWithLifecycle()
     val isMonitoring by vm.isMonitoring.collectAsStateWithLifecycle()
+    val showCurrentInMa by vm.showCurrentInMa.collectAsStateWithLifecycle()
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -172,7 +174,7 @@ fun DashboardScreen(
             contentPadding = pv,
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            item { HeroBatteryCard(rt, session) }
+            item { HeroBatteryCard(rt, session, showCurrentInMa) }
             item {
                 ControlCenter(
                     session = session,
@@ -192,7 +194,8 @@ fun DashboardScreen(
 @Composable
 private fun HeroBatteryCard(
     rt: BatteryRepository.Realtime,
-    session: ChargeSession?
+    session: ChargeSession?,
+    showCurrentInMa: Boolean
 ) {
     ElevatedCard(
         modifier = Modifier
@@ -243,6 +246,7 @@ private fun HeroBatteryCard(
                     level = rt.level,
                     isCharging = rt.plugged != 0,
                     current = rt.currentMa,
+                    currentLabel = currentLabel(rt, showCurrentInMa),
                     modifier = Modifier.size(180.dp)
                 )
 
@@ -284,6 +288,7 @@ private fun CircularBatteryIndicator(
     level: Int,
     isCharging: Boolean,
     current: Int,
+    currentLabel: String,
     modifier: Modifier = Modifier
 ) {
     val progress by animateFloatAsState(
@@ -358,7 +363,7 @@ private fun CircularBatteryIndicator(
                         tint = if (current > 0) colors.primary else colors.error
                     )
                     Text(
-                        text = "${kotlin.math.abs(current)} mA",
+                        text = currentLabel,
                         style = MaterialTheme.typography.labelLarge
                     )
                 }
@@ -757,4 +762,16 @@ private fun getHealthString(health: Int?): String = when(health) {
     6 -> "Failed"
     7 -> "Cold"
     else -> "Unknown"
+}
+/**
+ * The reading under the battery ring. "Show Current in mA" chooses between the raw draw and
+ * the share of the battery per hour; without a capacity to measure against there is no share
+ * to show, so the mA stands either way.
+ */
+@Composable
+private fun currentLabel(rt: BatteryRepository.Realtime, showCurrentInMa: Boolean): String {
+    val milliAmps = "${kotlin.math.abs(rt.currentMa)} mA"
+    if (showCurrentInMa) return milliAmps
+    val capacity = rt.sample?.let { TimeEstimator.capacityMahFor(it) }
+    return formatLevelRatePerHour(rt.currentMa, capacity) ?: milliAmps
 }

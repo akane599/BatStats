@@ -81,6 +81,34 @@ interface AppEnergyDao {
     """)
     fun topDrainers(from: Long, to: Long, mode: String = "HEURISTIC", limit: Int = 10): Flow<List<AppDrainAggregate>>
 
+    /**
+     * Every app with recorded energy in the window, heaviest first.
+     *
+     * Unlike [topDrainers] this is unbounded, so the caller can show a share of the real
+     * total rather than a share of whatever made the top ten.
+     */
+    @Query("""
+        SELECT packageName AS packageName, SUM(energyMah) AS energyMah, SUM(samples) AS samples
+        FROM app_energy_stats
+        WHERE bucketStart BETWEEN :from AND :to AND mode = :mode
+        GROUP BY packageName
+        ORDER BY energyMah DESC
+    """)
+    fun drainersInRange(from: Long, to: Long, mode: String): Flow<List<AppDrainAggregate>>
+
+    /**
+     * Which measurement modes have data in the window, heaviest first. A privileged mode is
+     * a real reading from batterystats; HEURISTIC is an estimate, and the two should not be
+     * added together.
+     */
+    @Query("""
+        SELECT mode FROM app_energy_stats
+        WHERE bucketStart BETWEEN :from AND :to
+        GROUP BY mode
+        ORDER BY SUM(energyMah) DESC
+    """)
+    fun modesInRange(from: Long, to: Long): Flow<List<String>>
+
     @Query("DELETE FROM app_energy_stats WHERE bucketStart < :olderThan")
     suspend fun purgeOlderThan(olderThan: Long)
 }

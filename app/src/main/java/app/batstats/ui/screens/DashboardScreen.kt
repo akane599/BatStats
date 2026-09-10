@@ -113,10 +113,6 @@ import org.koin.androidx.compose.koinViewModel
 fun DashboardScreen(
     onOpenHistory: () -> Unit,
     onOpenAlarms: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenData: () -> Unit,
-    onOpenDetailedStats: () -> Unit,
-    onOpenDrainStats: () -> Unit,
     vm: DashboardViewModel = koinViewModel()
 ) {
     val rt by vm.realtime.collectAsStateWithLifecycle()
@@ -155,24 +151,15 @@ fun DashboardScreen(
                         }
                     }
                 },
+                // Everything else moved to the navigation bar. Material asks for at most
+                // three actions here; there were six, and on a narrow phone they left the
+                // title barely any room.
                 actions = {
                     IconButton(onClick = onOpenHistory) {
                         Icon(Icons.Outlined.History, stringResource(R.string.history))
                     }
                     IconButton(onClick = onOpenAlarms) {
                         Icon(Icons.Outlined.Notifications, stringResource(R.string.alarms))
-                    }
-                    IconButton(onClick = onOpenData) {
-                        Icon(Icons.Outlined.CloudDownload, stringResource(R.string.data_export_import))
-                    }
-                    IconButton(onClick = onOpenDrainStats) {
-                        Icon(Icons.AutoMirrored.Outlined.ShowChart, stringResource(R.string.drain_statistics))
-                    }
-                    IconButton(onClick = onOpenDetailedStats) {
-                        Icon(Icons.Outlined.Analytics, stringResource(R.string.detailed_stats))
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, stringResource(R.string.settings))
                     }
                 },
                 scrollBehavior = scrollBehavior

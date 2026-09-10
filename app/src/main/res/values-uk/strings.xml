@@ -256,4 +256,15 @@
     <string name="widget_battery">Battery</string>
     <string name="widget_temperature">Temperature</string>
     <string name="widget_eta">ETA</string>
+    <string name="nav_battery">Battery</string>
+    <string name="nav_apps">Apps</string>
+    <string name="nav_drain">Drain</string>
+    <string name="nav_stats">Stats</string>
+    <string name="nav_settings">Settings</string>
+    <string name="app_drain">App Drain</string>
+    <string name="last_24_hours">Last 24 hours</string>
+    <string name="no_app_drain_yet">Nothing recorded yet</string>
+    <string name="no_app_drain_explanation">Per-app drain is collected while monitoring runs. Give it an hour or two, then check back.</string>
+    <string name="drain_source_measured">Measured from batterystats</string>
+    <string name="drain_source_estimated">Estimated — grant Shizuku, root or ADB for measured figures</string>
 </resources>

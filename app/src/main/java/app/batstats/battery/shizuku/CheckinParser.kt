@@ -3,17 +3,26 @@ package app.batstats.battery.shizuku
 import app.batstats.battery.util.BatteryStatsParser
 
 /**
- * Small parser for "dumpsys batterystats --checkin".
- * reads "l,pwi,uid,<mAh>..." rows and the earlier "i,uid,<uid>,<package>" map.
- * Returns per-package cumulative mAh since last full charge.
+ * Small parser for "dumpsys batterystats --checkin", for the per-app energy poller.
+ *
+ * Deliberately lighter than [BatteryStatsParser.parseCheckin]: this runs on a background
+ * schedule and only needs the per-app power figures, not wakelocks, alarms, sensors and the
+ * rest.
+ *
+ * Returns cumulative mAh since the last full charge, keyed by uid. Uids rather than package
+ * names because the dump's own uid -> package map is only as complete as the identity that
+ * produced it; the caller resolves the leftovers through PackageManager.
  */
 object CheckinParser {
 
-    data class Snapshot(val perPackageMah: Map<String, Double>)
+    data class Snapshot(
+        val perUidMah: Map<Int, Double>,
+        val uidToPackage: Map<Int, String>
+    )
 
     fun parse(lines: Sequence<String>): Snapshot {
         val uidToPkg = mutableMapOf<Int, String>()
-        val energyByPkg = mutableMapOf<String, Double>()
+        val energyByUid = mutableMapOf<Int, Double>()
 
         lines.forEach { line ->
             // Quote-aware: names may contain commas.
@@ -23,19 +32,21 @@ object CheckinParser {
             // uid map: 9,0,i,uid,1000,android
             if (p[2] == "i" && p[3] == "uid" && p.size >= 6) {
                 val uid = p[4].toIntOrNull() ?: return@forEach
-                val pkg = p[5]
-                // prefer non-system packages; but keep all
-                uidToPkg[uid] = pkg
+                uidToPkg[uid] = p[5]
             }
 
-            // power use item: 9,<uid>,l,pwi,uid,<mAh>,...
+            // Power use item: 9,<uid>,l,pwi,<label>,<mAh>,...
             if (p[2] == "l" && p[3] == "pwi" && p.size >= 6) {
+                // Only rows labelled "uid" are per-app. The rest are device-wide component
+                // totals - screen, cpu, cell, gnss - reported against uid 0. Without this
+                // check every one of them was folded into whichever package owns uid 0, so
+                // one app appeared to be responsible for the screen and the radio.
+                if (p[4] != "uid") return@forEach
                 val uid = p[1].toIntOrNull() ?: return@forEach
                 val mah = p[5].toDoubleOrNull() ?: return@forEach
-                val pkg = uidToPkg[uid] ?: "uid:$uid"
-                energyByPkg[pkg] = (energyByPkg[pkg] ?: 0.0) + mah
+                energyByUid[uid] = (energyByUid[uid] ?: 0.0) + mah
             }
         }
-        return Snapshot(energyByPkg)
+        return Snapshot(energyByUid, uidToPkg)
     }
 }

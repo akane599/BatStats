@@ -9,12 +9,15 @@ import app.batstats.battery.drain.AdvancedDrainTracker
 import app.batstats.battery.drain.DrainNotificationManager
 import app.batstats.battery.shizuku.BstatsCollector
 import app.batstats.battery.shizuku.ShizukuBridge
+import app.batstats.battery.util.AppInfoResolver
 import app.batstats.battery.util.CheckinSource
 import app.batstats.battery.util.DetailedStatsCollector
+import app.batstats.battery.util.PackageNameResolver
 import app.batstats.battery.util.ShellRunner
 import app.batstats.insights.ForegroundDrainTracker
 import app.batstats.settings.AppSettings
 import app.batstats.settings.AppSettingsSchema
+import app.batstats.viewmodel.AppDrainViewModel
 import app.batstats.viewmodel.DashboardViewModel
 import app.batstats.viewmodel.DataViewModel
 import app.batstats.viewmodel.DetailedStatsViewModel
@@ -49,8 +52,10 @@ val appModule = module {
     single { ShellRunner(androidContext(), get()) }
     // One shared checkin dump: both collectors read it rather than each running their own.
     single { CheckinSource(get()) }
+    single { PackageNameResolver(androidContext()) }
+    single { AppInfoResolver(androidContext()) }
     single { DetailedStatsCollector(get(), get(), androidContext(), get(), get()) }
-    single { BstatsCollector(get<BatteryDatabase>().appEnergyDao(), get(), get()) }
+    single { BstatsCollector(get<BatteryDatabase>().appEnergyDao(), get(), get(), get()) }
 
     single<SettingsRepository<AppSettings>> {
         SettingsRepository(dataStore = get(), schema = AppSettingsSchema)
@@ -99,6 +104,7 @@ val appModule = module {
     viewModel { HistoryViewModel(get()) }
     viewModel { DataViewModel(get()) }
     viewModel { DrainStatsViewModel(get()) }
+    viewModel { AppDrainViewModel(get<BatteryDatabase>().appEnergyDao(), get()) }
 
     viewModel { (sessionId: String) -> SessionDetailsViewModel(androidApplication(), get(), get(), sessionId) }
 }

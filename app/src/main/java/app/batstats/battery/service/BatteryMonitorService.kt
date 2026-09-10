@@ -150,15 +150,20 @@ class BatteryMonitorService : Service() {
     }
 
     /**
-     * The rate of change is shown as a share of the battery per hour rather than in mA: a
-     * phone pulling 780 mA tells you little on its own, "-4.1%/h" tells you how long you
-     * have. Devices whose capacity we cannot establish keep the mA reading.
+     * "Level 47% • -780 mA · -15.6%/h • 3812 mV".
+     *
+     * Both readings earn their place: the mA is what the hardware actually reports and is
+     * the number to compare against another device or another app, while the share per hour
+     * is what says how long the battery has left. Where the capacity could not be
+     * established the share is dropped rather than computed against a guess.
      */
     private fun monitoringText(rt: BatteryRepository.Realtime): String {
         val sample = rt.sample ?: return "Waiting for battery data…"
         val capacity = TimeEstimator.capacityMahFor(sample)
-        val rate = formatLevelRatePerHour(rt.currentMa, capacity) ?: "${rt.currentMa} mA"
-        return "Level ${rt.level}% • $rate • ${rt.voltageMv} mV"
+        val milliAmps = "${rt.currentMa} mA"
+        val rate = formatLevelRatePerHour(rt.currentMa, capacity)
+        val draw = if (rate == null) milliAmps else "$milliAmps · $rate"
+        return "Level ${rt.level}% • $draw • ${rt.voltageMv} mV"
     }
 
     private fun goForeground(id: Int, notification: Notification): Boolean = try {

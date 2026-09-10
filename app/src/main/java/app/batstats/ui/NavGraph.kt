@@ -1,11 +1,13 @@
 package app.batstats.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
+import app.batstats.ui.screens.AppDrainScreen
 import app.batstats.ui.screens.BatterySettingsScreen
 import app.batstats.ui.screens.DashboardScreen
 import app.batstats.ui.screens.DataScreen
@@ -20,9 +22,11 @@ import org.koin.core.parameter.parametersOf
 @Composable
 fun NavGraph(
     backStack: NavBackStack<NavKey>,
-    decorators: List<NavEntryDecorator<Any>>
+    decorators: List<NavEntryDecorator<Any>>,
+    modifier: Modifier = Modifier
 ) {
     NavDisplay(
+        modifier = modifier,
         backStack = backStack,
         onBack = { backStack.removeAt(backStack.lastIndex) },
         entryDecorators = decorators,
@@ -32,11 +36,7 @@ fun NavGraph(
             entry<Screen.Dashboard> {
                 DashboardScreen(
                     onOpenHistory = { backStack.add(Screen.History) },
-                    onOpenAlarms = { backStack.add(Screen.Settings(initialCategory = "Notifications")) },
-                    onOpenSettings = { backStack.add(Screen.Settings()) },
-                    onOpenData = { backStack.add(Screen.Data) },
-                    onOpenDetailedStats = { backStack.add(Screen.DetailedStats) },
-                    onOpenDrainStats = { backStack.add(Screen.DrainStats) }
+                    onOpenAlarms = { backStack.add(Screen.Settings(initialCategory = "Notifications")) }
                 )
             }
 
@@ -74,6 +74,10 @@ fun NavGraph(
             entry<Screen.DrainStats> {
                 DrainStatsScreen(onBack = { backStack.removeAt(backStack.lastIndex) })
             }
+
+            entry<Screen.AppDrain> {
+                AppDrainScreen(onBack = { backStack.removeAt(backStack.lastIndex) })
+            }
         }
     )
 }
@@ -103,4 +107,7 @@ sealed interface Screen: NavKey {
 
     @Serializable
     data object DrainStats : Screen
+
+    @Serializable
+    data object AppDrain : Screen
 }

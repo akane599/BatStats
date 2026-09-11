@@ -55,8 +55,7 @@ jobs:
             adb shell dumpsys battery set status 3
             adb shell dumpsys battery set ac 0
             adb shell dumpsys battery set usb 0
-            ./gradlew :app:connectedDebugAndroidTest -PenableApkSplits=false --stacktrace
-            adb pull /sdcard/Android/data/org.mlm.batstats.debug/files/screenshots screenshots
+            bash tools/run-device-tests.sh
       - name: Preserve reports and screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -66,4 +65,5 @@ jobs:
             app/build/reports/
             app/build/outputs/androidTest-results/
             screenshots/
+            device-logcat.txt
           if-no-files-found: warn

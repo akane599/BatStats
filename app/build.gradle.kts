@@ -146,6 +146,12 @@ apkDist {
     artifactNamePrefix = "batstats"
 }
 
+// apk-dist writes into AGP's APK directory as an assemble finalizer. Connected tests
+// consume that same directory, so Gradle 9 requires their ordering to be explicit.
+tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+    mustRunAfter(tasks.matching { it.name == "distDebugApks" })
+}
+
 // Configure all tasks that are instances of AbstractArchiveTask
 tasks.withType<AbstractArchiveTask>().configureEach {
     isPreserveFileTimestamps = false

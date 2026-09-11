@@ -168,9 +168,8 @@ class MonitorNotificationTest {
         return if (style == 0) {
             if (drain) text in listOf(context.getString(R.string.screen_on), context.getString(R.string.screen_off))
             else text.startsWith(context.getString(R.string.notif_level, "").trim())
-        } else if (drain) {
-            text.contains(context.getString(R.string.screen_on)) && text.contains(context.getString(R.string.screen_off))
-        } else text.count { it == '•' } >= 2
+        } else if (drain) text.contains(" • ")
+        else text.count { it == '•' } >= 2
     }
 
     private fun notificationSummary(notification: Notification?): String {

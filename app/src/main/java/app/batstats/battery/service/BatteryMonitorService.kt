@@ -142,10 +142,16 @@ class BatteryMonitorService : Service() {
                         title = content.title
                     )
                 }
+                val fingerprint = NotificationFingerprint.from(notification)
+                if (fingerprint == lastNotificationFingerprint) return@collect
                 try {
                     getSystemService(NotificationManager::class.java)?.notify(Notifier.NOTIF_ID, notification)
                 } catch (e: SecurityException) {
                     Log.w(TAG, "Monitoring notification permission is unavailable", e)
+                } finally {
+                    // Avoid repeating an identical binder update and error on every current
+                    // sample. A content, style, state or channel change creates a new key.
+                    lastNotificationFingerprint = fingerprint
                 }
             }
         }
@@ -209,4 +215,24 @@ class BatteryMonitorService : Service() {
         val drainState: app.batstats.battery.drain.DrainState?,
         val settings: NotificationPreferences
     )
+
+    private var lastNotificationFingerprint: NotificationFingerprint? = null
+
+    private data class NotificationFingerprint(
+        val channelId: String?,
+        val title: String,
+        val text: String,
+        val details: String?,
+        val actions: List<String>
+    ) {
+        companion object {
+            fun from(notification: Notification) = NotificationFingerprint(
+                channelId = notification.channelId,
+                title = notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty(),
+                text = notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty(),
+                details = notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString(),
+                actions = notification.actions.orEmpty().map { it.title.toString() }
+            )
+        }
+    }
 }

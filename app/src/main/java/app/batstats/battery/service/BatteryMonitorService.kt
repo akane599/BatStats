@@ -23,6 +23,7 @@ import app.batstats.battery.widget.WidgetUpdater
 import app.batstats.insights.ForegroundDrainTracker
 import app.batstats.settings.notificationStyle
 import app.batstats.settings.useFahrenheit
+import app.batstats.settings.NotificationStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -71,8 +72,10 @@ class BatteryMonitorService : Service() {
 
         serviceScope.launch {
             while (isActive) {
-                dataRetentionManager.cleanupIfDue()
+                // Application startup already performs the due-now cleanup. Waiting here
+                // avoids racing a duplicate settings read and database purge at service start.
                 delay(DataRetentionManager.CLEANUP_INTERVAL_MS)
+                dataRetentionManager.cleanupIfDue()
             }
         }
 
@@ -106,27 +109,39 @@ class BatteryMonitorService : Service() {
         // A single owner and ID prevents old plain/drain notifications reappearing after
         // a setting changes. Serializing on Main also orders updates before onDestroy.
         serviceScope.launch(Dispatchers.Main.immediate) {
+            val notificationSettings = BatteryGraph.settings.flow.map {
+                NotificationPreferences(
+                    showDrain = it.showDrainNotification,
+                    visible = it.showNotification,
+                    style = it.notificationStyle,
+                    useFahrenheit = it.useFahrenheit
+                )
+            }.distinctUntilChanged()
             combine(
                 BatteryGraph.repo.realtimeFlow.map { it.sample }.distinctUntilChanged(),
                 advancedDrainTracker.drainState,
-                BatteryGraph.settings.flow
+                notificationSettings
             ) { sample, state, settings ->
-                if (settings.showDrainNotification && settings.showNotification) {
-                    drainNotificationManager.getNotification(state, settings.notificationStyle)
+                NotificationFrame(
+                    sample = sample,
+                    drainState = state.takeIf { settings.showDrain && settings.visible },
+                    settings = settings
+                )
+            }.distinctUntilChanged().collect { frame ->
+                val notification = if (frame.drainState != null) {
+                    drainNotificationManager.getNotification(frame.drainState, frame.settings.style)
                 } else {
                     val content = MonitorNotificationText.from(
-                        this@BatteryMonitorService, sample, settings.notificationStyle, settings.useFahrenheit
+                        this@BatteryMonitorService, frame.sample, frame.settings.style, frame.settings.useFahrenheit
                     )
                     Notifier.monitoringNotification(
                         ctx = this@BatteryMonitorService,
                         text = content.text,
-                        visible = settings.showNotification,
+                        visible = frame.settings.visible,
                         details = content.details,
-                        title = content.title,
-                        readingTime = sample?.timestamp
+                        title = content.title
                     )
                 }
-            }.collect { notification ->
                 try {
                     getSystemService(NotificationManager::class.java)?.notify(Notifier.NOTIF_ID, notification)
                 } catch (e: SecurityException) {
@@ -180,4 +195,17 @@ class BatteryMonitorService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private data class NotificationPreferences(
+        val showDrain: Boolean,
+        val visible: Boolean,
+        val style: NotificationStyle,
+        val useFahrenheit: Boolean
+    )
+
+    private data class NotificationFrame(
+        val sample: app.batstats.battery.data.db.BatterySample?,
+        val drainState: app.batstats.battery.drain.DrainState?,
+        val settings: NotificationPreferences
+    )
 }

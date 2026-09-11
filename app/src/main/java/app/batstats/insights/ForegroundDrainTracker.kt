@@ -43,15 +43,16 @@ class ForegroundDrainTracker(
                 // uncapped this would attribute hours of drain to it on a single reading.
                 val dtHours = ((now - lastTs).coerceIn(0L, MAX_ATTRIBUTED_GAP_MS)) / 3_600_000.0
 
-                val screenOn = rt.sample?.screenOn == true
-                val pkg = if (screenOn && hasUsageAccess()) {
-                    currentForegroundPackage(lastTs, lastPkg)
-                } else null
-
                 // Only discharge is attributable. The current is positive on the charger, so
                 // taking its magnitude used to credit a fast charge to whatever app happened
                 // to be open - 1500 mA of charging read as 1420 mA of "excess app drain".
+                val screenOn = rt.sample?.screenOn == true
                 val discharging = rt.plugged == 0 && rt.currentMa < 0
+                // UsageStats is a binder/database query. There is no attribution work to do
+                // while charging or screen-off, so avoid paying for that query on those samples.
+                val pkg = if (shouldQueryForegroundApp(screenOn, rt.plugged, rt.currentMa) && hasUsageAccess()) {
+                    currentForegroundPackage(lastTs, lastPkg)
+                } else null
                 if (discharging && screenOn) {
                     val ma = abs(rt.currentMa.toDouble())
                     val baselines = screenOnBaseline
@@ -137,3 +138,6 @@ class ForegroundDrainTracker(
         private const val MAX_ATTRIBUTED_GAP_MS = 5 * 60_000L
     }
 }
+
+internal fun shouldQueryForegroundApp(screenOn: Boolean, plugged: Int, currentMa: Int): Boolean =
+    screenOn && plugged == 0 && currentMa < 0

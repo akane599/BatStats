@@ -346,14 +346,8 @@
     <string name="json_size_hint">JSON imports support files up to 32 MB. Use CSV for larger archives. An open imported session must not conflict with an existing session.</string>
     <string name="notif_current_out">%1$s out</string>
     <string name="notif_current_in">%1$s in</string>
-    <string name="notif_current_reading">Reading: %1$s</string>
-    <string name="notif_voltage">Voltage: %1$s</string>
-    <string name="notif_battery_power">Battery power: %1$s</string>
     <string name="notif_last_reading">Last reading: %1$s</string>
     <string name="notif_drain_channel_description">Recorded screen-on and screen-off battery drain</string>
-    <string name="notif_screen_off_times">While screen off: CPU awake %1$s · Deep sleep %2$s</string>
-    <string name="notif_recorded_drain">Recorded drain: %1$s over %2$s</string>
-    <string name="notif_drain_average_note">Rates average recorded discharge. Powered time is excluded.</string>
     <string name="statistics_accounting_note">Android battery accounting since its last reset or charge-cycle reset. Energy and capacity are system estimates; app percentages use full battery capacity.</string>
     <string name="screen_battery_share_format">%1$.1f%% of recorded battery time</string>
     <string name="device_full_idling_time">Device full idling</string>

@@ -9,7 +9,6 @@ import androidx.core.app.NotificationCompat
 import app.batstats.R
 import app.batstats.battery.BatteryMainActivity
 import app.batstats.battery.service.BatteryMonitorService
-import app.batstats.battery.drain.DrainNotificationReceiver
 
 object Notifier {
     private const val CH_ID = "battery_monitor"
@@ -75,8 +74,7 @@ object Notifier {
         text: String,
         visible: Boolean = true,
         details: String? = null,
-        title: String? = null,
-        readingTime: Long? = null
+        title: String? = null
     ): Notification {
         val channelId = ensureChannel(ctx, visible)
         val pi = PendingIntent.getActivity(
@@ -97,25 +95,12 @@ object Notifier {
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setWhen(readingTime ?: System.currentTimeMillis())
-            .setShowWhen(readingTime != null)
-            .addAction(android.R.drawable.ic_media_pause, ctx.getString(R.string.pause_monitoring), pauseIntent(ctx))
+            .setShowWhen(false)
             .setPriority(
                 if (visible) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_MIN
             )
             .build()
     }
-
-    fun pauseIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
-        ctx,
-        2002,
-        Intent(ctx, DrainNotificationReceiver::class.java)
-            .setAction(DrainNotificationReceiver.ACTION_PAUSE)
-            // A user tap must not wait behind slow background broadcasts. This receiver
-            // only requests stopService and returns, fitting the shorter foreground budget.
-            .addFlags(Intent.FLAG_RECEIVER_FOREGROUND),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
 
     fun notifyChargeLimit(ctx: Context, limit: Int) {
         ensureChannel(ctx)

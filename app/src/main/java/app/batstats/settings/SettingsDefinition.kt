@@ -22,6 +22,7 @@ data class AppSettings(
 
     @Setting(
         title = "Monitoring Interval",
+        description = "Sampling interval while the screen is on. Screen-off sampling is limited to once per minute to reduce monitoring overhead.",
         category = General::class,
         type = Dropdown::class,
         options = ["5 seconds", "10 seconds", "30 seconds", "1 minute", "5 minutes"],
@@ -64,7 +65,7 @@ data class AppSettings(
      */
     @Setting(
         title = "Collect Per-App Drain",
-        description = "Records which apps use power, for the App Drain screen. Polls batterystats every 5 minutes.",
+        description = "Records which apps use power, for the App Drain screen. Polls cumulative batterystats every 15 minutes to reduce overhead.",
         category = General::class,
         type = Toggle::class,
         key = "track_app_drain"

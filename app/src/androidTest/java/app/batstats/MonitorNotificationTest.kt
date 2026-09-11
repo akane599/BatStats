@@ -64,7 +64,7 @@ class MonitorNotificationTest {
         }
     }
 
-    @Test fun switchingStylesKeepsOneMonitorAndPauseStopsService() {
+    @Test fun switchingStylesKeepOneMonitorAndOriginalActions() {
         ContextCompat.startForegroundService(context, Intent(context, BatteryMonitorService::class.java))
         compose.waitUntil(20_000) {
             BatteryGraph.repo.isMonitoringFlow.value && BatteryGraph.repo.realtimeFlow.value.sample != null
@@ -84,9 +84,11 @@ class MonitorNotificationTest {
                     active.count { it.notification.flags and Notification.FLAG_ONGOING_EVENT != 0 })
                 val current = active.single { it.id == Notifier.NOTIF_ID }.notification
                 assertTrue(current.flags and Notification.FLAG_FOREGROUND_SERVICE != 0)
-                assertEquals(listOf(context.getString(R.string.pause_monitoring)),
-                    current.actions.orEmpty().map { it.title.toString() })
-                assertTrue("Notification time must refer to a battery reading", current.`when` > 0)
+                assertEquals(
+                    if (drain) listOf(context.getString(R.string.reset_action)) else emptyList(),
+                    current.actions.orEmpty().map { it.title.toString() }
+                )
+                assertFalse("Monitoring updates must not present themselves as new timed events", current.extras.getBoolean(Notification.EXTRA_SHOW_WHEN))
                 if (style == 2) captureNotificationShade(if (drain) "notification-drain" else "notification-monitor")
             }
         }
@@ -97,7 +99,7 @@ class MonitorNotificationTest {
         assertEquals(1, notifications.activeNotifications.count {
             it.notification.flags and Notification.FLAG_ONGOING_EVENT != 0
         })
-        monitor()!!.actions.single().actionIntent.send()
+        context.stopService(Intent(context, BatteryMonitorService::class.java))
         compose.waitUntil(15_000) {
             !BatteryGraph.repo.isMonitoringFlow.value && monitor() == null
         }
@@ -112,16 +114,16 @@ class MonitorNotificationTest {
             temperatureDeciC = null, health = null, screenOn = true
         )
         val content = MonitorNotificationText.from(context, sample, NotificationStyle.DETAILED, useFahrenheit = true)
-        assertTrue(content.title.contains(context.getString(R.string.charging_paused)))
+        assertEquals(context.getString(R.string.monitoring_battery), content.title)
         val details = requireNotNull(content.details)
+        assertTrue(details.contains(context.getString(R.string.charging_paused)))
         assertTrue("Absent sensor values must remain unknown, including Fahrenheit", details.count { it == '—' } >= 4)
         listOf("0 mA", "0 mV", "0 mW", "32.0 °F").forEach { fabricated ->
             assertFalse("Missing reading became $fabricated", details.contains(fabricated))
         }
-        val standard = Notifier.monitoringNotification(context, content.text, details = details,
-            title = content.title, readingTime = sample.timestamp)
-        assertEquals(sample.timestamp, standard.`when`)
-        assertEquals(listOf(context.getString(R.string.pause_monitoring)), standard.actions.map { it.title.toString() })
+        val standard = Notifier.monitoringNotification(context, content.text, details = details, title = content.title)
+        assertFalse(standard.extras.getBoolean(Notification.EXTRA_SHOW_WHEN))
+        assertTrue(standard.actions.orEmpty().isEmpty())
 
         val drain = GlobalContext.get().get<DrainNotificationManager>()
         val waiting = drain.getNotification(state = DrainState(), style = NotificationStyle.DETAILED)
@@ -135,9 +137,11 @@ class MonitorNotificationTest {
         )
         val drainText = emptySession.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
         assertEquals("An unobserved drain rate must not be shown as zero", 2, drainText.count { it == '—' })
-        assertEquals(sample.timestamp, emptySession.`when`)
+        assertFalse(emptySession.extras.getBoolean(Notification.EXTRA_SHOW_WHEN))
         assertTrue(emptySession.extras.getCharSequence(Notification.EXTRA_TITLE).toString()
             .contains(context.getString(R.string.charging_paused)))
+        assertEquals(listOf(context.getString(R.string.reset_action)),
+            emptySession.actions.orEmpty().map { it.title.toString() })
     }
 
     private fun monitor(): Notification? = notifications.activeNotifications
@@ -152,7 +156,7 @@ class MonitorNotificationTest {
         if ((details != null) != (style == 2)) return false
         return if (style == 0) {
             if (drain) text in listOf(context.getString(R.string.screen_on), context.getString(R.string.screen_off))
-            else text == context.getString(R.string.monitoring_battery)
+            else text.startsWith(context.getString(R.string.notif_level, "").trim())
         } else if (drain) {
             text.contains(context.getString(R.string.screen_on)) && text.contains(context.getString(R.string.screen_off))
         } else text.contains(" · ")
@@ -167,9 +171,9 @@ class MonitorNotificationTest {
                 android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
         }
         val appName = context.getString(R.string.app_name)
-        val pause = context.getString(R.string.pause_monitoring)
-        val detailMarker = if (name == "notification-drain") context.getString(R.string.notif_drain_average_note)
-            else context.getString(R.string.notif_voltage, "").trim()
+        val expectedAction = if (name == "notification-drain") context.getString(R.string.reset_action) else null
+        val detailMarker = if (name == "notification-drain") context.getString(R.string.notif_session_heading)
+            else context.getString(R.string.notif_status, "").trim()
         fun descendants(root: android.view.accessibility.AccessibilityNodeInfo): List<android.view.accessibility.AccessibilityNodeInfo> {
             val result = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
             val queue = java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
@@ -202,15 +206,15 @@ class MonitorNotificationTest {
         fun isAppHeader(node: android.view.accessibility.AccessibilityNodeInfo) = node.isVisibleToUser &&
             listOf(node.text, node.contentDescription).any { it?.toString()?.contains(appName, ignoreCase = true) == true } &&
             inNotificationHeader(node)
-        fun isPause(node: android.view.accessibility.AccessibilityNodeInfo) =
-            listOf(node.text, node.contentDescription).any { it?.toString()?.equals(pause, ignoreCase = true) == true }
-        fun pauseVisible(root: android.view.accessibility.AccessibilityNodeInfo): Boolean =
-            descendants(root).any { it.isVisibleToUser && isPause(it) }
+        fun isExpectedAction(node: android.view.accessibility.AccessibilityNodeInfo) = expectedAction != null &&
+            listOf(node.text, node.contentDescription).any { it?.toString()?.equals(expectedAction, ignoreCase = true) == true }
+        fun actionVisible(root: android.view.accessibility.AccessibilityNodeInfo): Boolean =
+            expectedAction == null || descendants(root).any { it.isVisibleToUser && isExpectedAction(it) }
         fun detailsVisible(root: android.view.accessibility.AccessibilityNodeInfo): Boolean =
             descendants(root).any { it.isVisibleToUser && it.text?.toString()?.contains(detailMarker) == true }
-        fun expandedVisible(root: android.view.accessibility.AccessibilityNodeInfo) = pauseVisible(root) && detailsVisible(root)
+        fun expandedVisible(root: android.view.accessibility.AccessibilityNodeInfo) = actionVisible(root) && detailsVisible(root)
         fun ownNotificationVisible(root: android.view.accessibility.AccessibilityNodeInfo): Boolean =
-            descendants(root).any { isAppHeader(it) || (it.isVisibleToUser && isPause(it)) }
+            descendants(root).any { isAppHeader(it) || (it.isVisibleToUser && isExpectedAction(it)) }
         fun expandOwnNotification(root: android.view.accessibility.AccessibilityNodeInfo): Boolean {
             // Start at our app header so another app's expand button cannot be selected.
             var node = descendants(root).firstOrNull(::isAppHeader) ?: return false
@@ -233,10 +237,10 @@ class MonitorNotificationTest {
             }
             return false
         }
-        fun revealPause(root: android.view.accessibility.AccessibilityNodeInfo): Boolean {
+        fun revealAction(root: android.view.accessibility.AccessibilityNodeInfo): Boolean {
             // Large fonts can place expanded actions below the viewport. Ask the action's
             // ancestor scroller to reveal it without tapping the action or notification.
-            val action = descendants(root).firstOrNull(::isPause) ?: return false
+            val action = descendants(root).firstOrNull(::isExpectedAction) ?: return false
             return !action.isVisibleToUser && action.performAction(
                 android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id
             )
@@ -255,7 +259,7 @@ class MonitorNotificationTest {
                 }
                 val now = android.os.SystemClock.uptimeMillis()
                 if (now - lastExpansion >= 1_000L && roots.any {
-                    expandOwnNotification(it) || revealPause(it)
+                    expandOwnNotification(it) || revealAction(it)
                 }) lastExpansion = now
                 android.os.SystemClock.sleep(100L)
             }
@@ -270,7 +274,7 @@ class MonitorNotificationTest {
                             "${it.viewIdResourceName}: ${it.text} (${it.contentDescription})"
                         }
                 }
-                fail("Expanded BatStats notification with Pause was not visible: ${visible.take(12_000)}")
+                fail("Expanded BatStats notification was not visible: ${visible.take(12_000)}")
             }
             val bitmap = requireNotNull(automation.takeScreenshot())
             try { TestScreenshots.save(name, bitmap) } finally { bitmap.recycle() }

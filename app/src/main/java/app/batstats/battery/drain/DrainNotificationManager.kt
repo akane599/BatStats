@@ -6,13 +6,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.text.format.DateFormat
 import androidx.core.app.NotificationCompat
 import app.batstats.R
 import app.batstats.battery.BatteryMainActivity
 import app.batstats.battery.util.Notifier
 import app.batstats.settings.NotificationStyle
-import java.util.Date
 
 /** Notification factory. The foreground service owns its one notification and update flow. */
 class DrainNotificationManager(
@@ -53,31 +51,53 @@ class DrainNotificationManager(
         )
         val screenOn = context.getString(R.string.screen_on)
         val screenOff = context.getString(R.string.screen_off)
-        // Power/screen boundaries refresh the drain state immediately. A repository
-        // sample may be minutes older when a long monitoring interval is selected.
-        val status = context.getString(when {
-            !state.hasBatteryReading -> R.string.monitoring_battery
-            state.isCharging -> R.string.charging
-            state.isPowered -> R.string.charging_paused
-            else -> R.string.discharging
-        })
+        val currentState = when {
+            !state.hasBatteryReading -> context.getString(R.string.monitoring_battery)
+            state.isCharging -> "⚡ ${context.getString(R.string.charging)}"
+            state.isPowered -> "🔌 ${context.getString(R.string.charging_paused)}"
+            state.isDozing -> "💤 ${context.getString(R.string.dozing)}"
+            state.isScreenOn -> "📱 $screenOn"
+            else -> "🌙 $screenOff"
+        }
         val title = if (state.hasBatteryReading && state.batteryLevel in 0..100) {
-            context.getString(R.string.battery_level, state.batteryLevel, status)
-        } else status
+            "${state.batteryLevel}% • $currentState"
+        } else currentState
         val text = when {
             !state.hasBatteryReading -> context.getString(R.string.waiting_for_battery)
             style == NotificationStyle.MINIMAL -> if (state.isScreenOn) screenOn else screenOff
-            else -> "$screenOn: ${formatDrainRatePreferPercent(state.screenOnDrainRate, state.capacityMah)} · " +
-                "$screenOff: ${formatDrainRatePreferPercent(state.screenOffDrainRate, state.capacityMah)}"
+            else -> context.getString(R.string.notif_drain_compact,
+                formatDrainRatePreferPercent(state.screenOnDrainRate, state.capacityMah),
+                formatDrainRatePreferPercent(state.screenOffDrainRate, state.capacityMah))
         }
         val details = if (style == NotificationStyle.DETAILED && state.hasBatteryReading) buildString {
-            appendLine("$screenOn: ${formatDuration(state.screenOnTimeMs)} · ${formatDrainRateWithPercent(state.screenOnDrainRate, state.capacityMah)}")
-            appendLine("$screenOff: ${formatDuration(state.screenOffTimeMs)} · ${formatDrainRateWithPercent(state.screenOffDrainRate, state.capacityMah)}")
-            appendLine(context.getString(R.string.notif_screen_off_times, formatDuration(state.awakeTimeMs), formatDuration(state.deepSleepTimeMs)))
-            appendLine(context.getString(R.string.notif_recorded_drain, formatMahWithPercent(state.totalDrainMah, state.capacityMah), formatDuration(state.trackedTimeMs)))
-            appendLine(context.getString(R.string.notif_drain_average_note))
-            append(context.getString(R.string.notif_last_reading, DateFormat.getTimeFormat(context).format(Date(state.lastUpdateTime))))
+            appendLine(context.getString(R.string.notif_drain_rates_heading))
+            appendLine("📱 " + context.getString(R.string.notif_rate_and_duration, screenOn,
+                formatDrainRateWithPercent(state.screenOnDrainRate, state.capacityMah), formatDuration(state.screenOnTimeMs)))
+            appendLine("🌙 " + context.getString(R.string.notif_rate_and_duration, screenOff,
+                formatDrainRateWithPercent(state.screenOffDrainRate, state.capacityMah), formatDuration(state.screenOffTimeMs)))
+            appendLine()
+            appendLine(context.getString(R.string.notif_screen_off_time_heading))
+            val awakeShare = if (state.screenOffTimeMs > 0) state.awakeTimeMs * 100.0 / state.screenOffTimeMs else 0.0
+            appendLine("😴 " + context.getString(R.string.notif_time_and_share, context.getString(R.string.deep_sleep),
+                formatDuration(state.deepSleepTimeMs), state.deepSleepPercentage.toDouble()))
+            appendLine("⚡ " + context.getString(R.string.notif_time_and_share, context.getString(R.string.awake),
+                formatDuration(state.awakeTimeMs), awakeShare))
+            appendLine()
+            appendLine(context.getString(R.string.notif_session_heading))
+            appendLine(context.getString(R.string.notif_session_total,
+                formatMahWithPercent(state.totalDrainMah, state.capacityMah), formatDuration(state.trackedTimeMs)))
+            append(context.getString(R.string.notif_session_average,
+                formatDrainRateWithPercent(state.averageDrainRate, state.capacityMah)))
         } else null
+
+        val resetIntent = PendingIntent.getBroadcast(
+            context,
+            1,
+            Intent(context, DrainNotificationReceiver::class.java)
+                .setAction(DrainNotificationReceiver.ACTION_RESET)
+                .addFlags(Intent.FLAG_RECEIVER_FOREGROUND),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
@@ -88,12 +108,11 @@ class DrainNotificationManager(
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
-            .setWhen(state.lastUpdateTime)
-            .setShowWhen(state.hasBatteryReading)
+            .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .addAction(android.R.drawable.ic_media_pause, context.getString(R.string.pause_monitoring), Notifier.pauseIntent(context))
+            .addAction(android.R.drawable.ic_menu_rotate, context.getString(R.string.reset_action), resetIntent)
             .build()
     }
 }

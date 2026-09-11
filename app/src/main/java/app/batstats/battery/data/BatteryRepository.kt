@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.PowerManager
+import androidx.core.content.ContextCompat
 import app.batstats.battery.data.db.BatteryCurrentPoint
 import app.batstats.battery.data.db.BatterySample
 import app.batstats.battery.data.db.BatteryDatabase
@@ -36,6 +38,7 @@ class BatteryRepository(
     private val scope: CoroutineScope
 ) {
     private val batteryDao = db.batteryDao()
+    private val powerManager = context.getSystemService(PowerManager::class.java)
     val sessionDao = db.sessionDao()
 
     // Settings flows
@@ -121,7 +124,7 @@ class BatteryRepository(
 
         // Register Receiver for system broadcasts (plug/unplug, % change)
         val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        context.registerReceiver(batteryReceiver, filter)
+        registerBatteryUpdates(context, batteryReceiver)
 
         // Start Polling Coroutine for current/voltage fluctuations
         // Android's ACTION_BATTERY_CHANGED is "sticky" but doesn't fire often enough
@@ -136,7 +139,10 @@ class BatteryRepository(
                         if (intent != null) {
                             processBatteryState(intent, persist = true)
                         }
-                        delay(intervalMs)
+                        // Screen/power broadcasts preserve exact drain boundaries. High-rate
+                        // history while the display is off adds writes and wakeups without
+                        // useful resolution, so use at most one persisted reading per minute.
+                        delay(effectiveMonitoringIntervalMs(intervalMs, powerManager.isInteractive))
                     }
                 }
         }
@@ -313,3 +319,18 @@ class BatteryRepository(
  */
 internal fun windowSlideIntervalMs(durationMs: Long): Long =
     (durationMs / 60).coerceIn(30_000L, 15 * 60_000L)
+
+internal fun effectiveMonitoringIntervalMs(configuredMs: Long, screenOn: Boolean): Long =
+    if (screenOn) configuredMs else configuredMs.coerceAtLeast(60_000L)
+
+/**
+ * The battery broadcast is system-protected. EXPORTED permits the platform's initial
+ * sticky replay on Android 8 while still preventing ordinary apps from forging it.
+ */
+internal fun registerBatteryUpdates(context: Context, receiver: BroadcastReceiver): Intent? =
+    ContextCompat.registerReceiver(
+        context,
+        receiver,
+        IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+        ContextCompat.RECEIVER_EXPORTED
+    )

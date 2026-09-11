@@ -17,11 +17,13 @@ object WidgetUpdater {
     const val ACTION_REFRESH = "app.batstats.battery.widget.ACTION_REFRESH"
 
     private const val EM_DASH = "—"
+    private data class RenderedWidget(val ids: List<Int>, val title: String, val value: String)
+    private val rendered = mutableMapOf<Class<*>, RenderedWidget>()
 
-    fun push(ctx: Context, s: BatterySample, useFahrenheit: Boolean = false) {
-        updateLevel(ctx, s)
-        updateTemp(ctx, s, useFahrenheit)
-        updateTime(ctx, s)
+    fun push(ctx: Context, s: BatterySample, useFahrenheit: Boolean = false, force: Boolean = false) {
+        updateLevel(ctx, s, force)
+        updateTemp(ctx, s, useFahrenheit, force)
+        updateTime(ctx, s, force)
     }
 
     /**
@@ -31,13 +33,13 @@ object WidgetUpdater {
      */
     fun refreshFromSystem(ctx: Context, useFahrenheit: Boolean = false) {
         val sample = BatteryReader.currentSample(ctx)
-        if (sample == null) showPlaceholder(ctx) else push(ctx, sample, useFahrenheit)
+        if (sample == null) showPlaceholder(ctx) else push(ctx, sample, useFahrenheit, force = true)
     }
 
     fun showPlaceholder(ctx: Context) {
-        setAll(ctx, BatteryLevelWidget::class.java, ctx.getString(R.string.widget_battery), EM_DASH)
-        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), EM_DASH)
-        setAll(ctx, BatteryTimeWidget::class.java, ctx.getString(R.string.widget_eta), EM_DASH)
+        setAll(ctx, BatteryLevelWidget::class.java, ctx.getString(R.string.widget_battery), EM_DASH, force = true)
+        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), EM_DASH, force = true)
+        setAll(ctx, BatteryTimeWidget::class.java, ctx.getString(R.string.widget_eta), EM_DASH, force = true)
     }
 
     private fun createRemoteViews(ctx: Context): RemoteViews {
@@ -55,29 +57,39 @@ object WidgetUpdater {
         return rv
     }
 
-    private fun setAll(ctx: Context, provider: Class<*>, title: String, value: String) {
+    private fun setAll(ctx: Context, provider: Class<*>, title: String, value: String, force: Boolean = false) {
         val mgr = AppWidgetManager.getInstance(ctx)
         val ids = mgr.getAppWidgetIds(ComponentName(ctx, provider))
-        if (ids.isEmpty()) return
+        val key = RenderedWidget(ids.sorted(), title, value)
+        synchronized(rendered) {
+            if (ids.isEmpty()) {
+                rendered.remove(provider)
+                return
+            }
+            if (!force && rendered[provider] == key) return
+        }
         val rv = createRemoteViews(ctx).apply {
             setTextViewText(R.id.title, title)
             setTextViewText(R.id.value, value)
         }
         ids.forEach { mgr.updateAppWidget(it, rv) }
+        // Cache only a successful binder update so a transient host failure is retried.
+        synchronized(rendered) { rendered[provider] = key }
     }
 
-    private fun updateLevel(ctx: Context, s: BatterySample) {
+    private fun updateLevel(ctx: Context, s: BatterySample, force: Boolean) {
         setAll(
             ctx,
             BatteryLevelWidget::class.java,
             ctx.getString(R.string.widget_battery),
-            if (s.levelPercent in 0..100) "${s.levelPercent}%" else EM_DASH
+            if (s.levelPercent in 0..100) "${s.levelPercent}%" else EM_DASH,
+            force
         )
     }
 
-    private fun updateTemp(ctx: Context, s: BatterySample, useFahrenheit: Boolean) {
+    private fun updateTemp(ctx: Context, s: BatterySample, useFahrenheit: Boolean, force: Boolean) {
         if (s.temperatureDeciC == null) {
-            setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), EM_DASH)
+            setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), EM_DASH, force)
             return
         }
         val tempC = s.temperatureDeciC / 10.0
@@ -86,15 +98,16 @@ object WidgetUpdater {
         } else {
             String.format(Locale.getDefault(), "%.1f °C", tempC)
         }
-        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), value)
+        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), value, force)
     }
 
-    private fun updateTime(ctx: Context, s: BatterySample) {
+    private fun updateTime(ctx: Context, s: BatterySample, force: Boolean) {
         setAll(
             ctx,
             BatteryTimeWidget::class.java,
             ctx.getString(R.string.widget_eta),
-            TimeEstimator.etaString(s) ?: EM_DASH
+            TimeEstimator.etaString(s) ?: EM_DASH,
+            force
         )
     }
 

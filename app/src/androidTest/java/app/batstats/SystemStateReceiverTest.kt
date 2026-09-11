@@ -7,6 +7,7 @@ import android.os.BatteryManager
 import android.os.PowerManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import app.batstats.battery.data.registerBatteryUpdates
 import app.batstats.battery.drain.registerDrainSystemReceiver
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -33,7 +34,7 @@ class SystemStateReceiverTest {
                 }
             }
         }
-        val sticky = registerDrainSystemReceiver(context, receiver)
+        val sticky = registerBatteryUpdates(context, receiver)
         try {
             assertNotNull("The platform must expose its current battery state", sticky)
             // A synchronous sticky lookup succeeds even with the old registration. The

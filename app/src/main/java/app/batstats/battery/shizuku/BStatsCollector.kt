@@ -34,6 +34,8 @@ class BstatsCollector(
 ) {
     companion object {
         private const val TAG = "BstatsCollector"
+        /** Cumulative batterystats deltas do not require a multi-hundred-KB dump every five minutes. */
+        internal const val DEFAULT_POLL_SECONDS = 15 * 60L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -42,7 +44,7 @@ class BstatsCollector(
 
     fun isRunning(): Boolean = running.get()
 
-    fun start(pollSec: Long = 300L) {
+    fun start(pollSec: Long = DEFAULT_POLL_SECONDS) {
         if (!running.compareAndSet(false, true)) return
         job = scope.launch {
             var previous: CheckinParser.Snapshot? = null

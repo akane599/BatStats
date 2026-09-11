@@ -9,9 +9,9 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
+import app.batstats.battery.data.BatteryRepository
 import app.batstats.battery.data.db.BatterySample
 import app.batstats.battery.util.BatteryCapacity
-import app.batstats.battery.util.batteryLevel
 import app.batstats.battery.util.BatteryReader
 import app.batstats.battery.util.BatteryStatsParser
 import app.batstats.battery.util.CheckinSource
@@ -32,11 +32,11 @@ class AdvancedDrainTracker(
     private val context: Context,
     private val settingsRepository: SettingsRepository<AppSettings>,
     private val checkinSource: CheckinSource,
+    private val batteryRepository: BatteryRepository,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 ) {
     companion object {
         private const val TAG = "AdvancedDrainTracker"
-        private const val POLL_INTERVAL_MS = 60_000L
     }
 
     private val running = AtomicBoolean(false)
@@ -66,25 +66,13 @@ class AdvancedDrainTracker(
                 when (intent.action) {
                     Intent.ACTION_POWER_CONNECTED -> pendingPowerState = true
                     Intent.ACTION_POWER_DISCONNECTED -> pendingPowerState = false
-                    Intent.ACTION_BATTERY_CHANGED -> {
-                        val state = _drainState.value
-                        val level = batteryLevel(intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1),
-                            intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)) ?: -1
-                        val powered = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
-                        val charging = intent.getIntExtra(BatteryManager.EXTRA_STATUS, 1) == BatteryManager.BATTERY_STATUS_CHARGING
-                        // Temperature-only broadcasts need not poll the gauge or redraw
-                        // drain history. Power/level changes update the title promptly.
-                        if (state.hasBatteryReading && pendingPowerState == null &&
-                            state.batteryLevel == level && state.isPowered == powered && state.isCharging == charging) return
-                    }
                 }
                 recordReading(
                     screenOverride = when (intent.action) {
                         Intent.ACTION_SCREEN_ON -> true
                         Intent.ACTION_SCREEN_OFF -> false
                         else -> null
-                    },
-                    batteryIntent = intent.takeIf { it.action == Intent.ACTION_BATTERY_CHANGED }
+                    }
                 )
             }
         }
@@ -98,23 +86,28 @@ class AdvancedDrainTracker(
         synchronized(ledgerLock) { pendingPowerState = null }
         resetSession()
         registerReceivers()
+        // The repository already owns the user-selected sampling timer. Reuse those
+        // readings rather than waking independently every minute and reading the same
+        // battery properties twice.
         trackingJob = scope.launch {
-            while (isActive && running.get()) {
+            batteryRepository.realtimeFlow
+                .map { it.sample }
+                .filterNotNull()
+                .distinctUntilChanged()
+                .collect sampleLoop@ { sample ->
                 try {
                     val generation = synchronized(ledgerLock) {
-                        if (!running.get()) return@launch
-                        recordReading(snapshot = true)
-                        sessionGeneration
-                    }
-                    // Settings are refreshed independently of the capacity-query cadence.
-                    val interval = settingsRepository.flow.first().detailedStatsIntervalMs
-                    refreshCapacity(generation, interval)
+                        if (!running.get()) null else {
+                            recordReading(snapshot = true, sampleOverride = sample)
+                            sessionGeneration
+                        }
+                    } ?: return@sampleLoop
+                    refreshCapacity(generation)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in tracking loop", e)
                 }
-                delay(POLL_INTERVAL_MS)
             }
         }
     }
@@ -163,8 +156,11 @@ class AdvancedDrainTracker(
         val dozing: Boolean
     )
 
-    private fun readBattery(screenOverride: Boolean? = null, batteryIntent: Intent? = null): Reading {
-        val sample = batteryIntent?.let { BatteryReader.sampleFrom(context, it) } ?: BatteryReader.currentSample(context)
+    private fun readBattery(
+        screenOverride: Boolean? = null,
+        sampleOverride: BatterySample? = null
+    ): Reading {
+        val sample = sampleOverride ?: BatteryReader.currentSample(context)
         val reportedPower = sample?.let { it.plugged != 0 }
         // BatteryService may deliver the power event before updating its sticky battery
         // intent. Keep the event's state until a matching battery reading arrives.
@@ -188,8 +184,12 @@ class AdvancedDrainTracker(
     }
 
     /** Caller holds ledgerLock so a reset/stop cannot be overwritten by a stale update. */
-    private fun recordReading(snapshot: Boolean = false, screenOverride: Boolean? = null, batteryIntent: Intent? = null) {
-        val reading = readBattery(screenOverride, batteryIntent)
+    private fun recordReading(
+        snapshot: Boolean = false,
+        screenOverride: Boolean? = null,
+        sampleOverride: BatterySample? = null
+    ) {
+        val reading = readBattery(screenOverride, sampleOverride)
         ledger.advance(reading.ledgerReading)
         publish(reading)
         if (snapshot) {
@@ -245,7 +245,13 @@ class AdvancedDrainTracker(
         )
     }
 
-    private suspend fun refreshCapacity(generation: Long, intervalMs: Long) {
+    private suspend fun refreshCapacity(generation: Long) {
+        // Most devices expose enough gauge data to derive capacity. In that common case,
+        // avoid even collecting the settings flow on every sample.
+        synchronized(ledgerLock) {
+            if (!running.get() || generation != sessionGeneration || knownCapacityMah > 0.0) return
+        }
+        val intervalMs = settingsRepository.flow.first().detailedStatsIntervalMs
         val now = SystemClock.elapsedRealtime()
         synchronized(ledgerLock) {
             if (!running.get() || generation != sessionGeneration) return
@@ -271,14 +277,12 @@ class AdvancedDrainTracker(
 }
 
 /**
- * These six actions are protected broadcasts: Android rejects sends by ordinary apps.
- * EXPORTED accepts their system delivery, including Android 8's initial sticky replay,
- * which has sender UID -1 and cannot hold AndroidX's NOT_EXPORTED signature permission.
- * Keep app-defined actions in separate, non-exported receivers.
+ * These five actions are protected broadcasts: Android rejects sends by ordinary apps.
+ * Keep app-defined actions in separate, non-exported receivers. Battery changes are
+ * consumed once by BatteryRepository instead of being parsed again in this tracker.
  */
 internal fun registerDrainSystemReceiver(context: Context, receiver: BroadcastReceiver): Intent? {
     val filter = IntentFilter().apply {
-        addAction(Intent.ACTION_BATTERY_CHANGED)
         addAction(Intent.ACTION_SCREEN_ON)
         addAction(Intent.ACTION_SCREEN_OFF)
         addAction(Intent.ACTION_POWER_CONNECTED)

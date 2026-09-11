@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name" translatable="false">BatStats</string>
 
     <string name="alarms">Alarms</string>
@@ -366,14 +366,20 @@
     <string name="json_size_hint">JSON imports support files up to 32 MB. Use CSV for larger archives. An open imported session must not conflict with an existing session.</string>
     <string name="notif_current_out">%1$s out</string>
     <string name="notif_current_in">%1$s in</string>
-    <string name="notif_current_reading">Reading: %1$s</string>
-    <string name="notif_voltage">Voltage: %1$s</string>
-    <string name="notif_battery_power">Battery power: %1$s</string>
+    <string name="notif_level" tools:ignore="MissingTranslation">Level %1$s</string>
+    <string name="notif_status" tools:ignore="MissingTranslation">Status: %1$s</string>
+    <string name="notif_temperature_and_power" tools:ignore="MissingTranslation">Temperature %1$s • Power %2$s</string>
+    <string name="notif_drain_compact" tools:ignore="MissingTranslation">On: %1$s • Off: %2$s</string>
+    <string name="notif_drain_rates_heading" tools:ignore="MissingTranslation">━━━ Drain Rates ━━━</string>
+    <string name="notif_screen_off_time_heading" tools:ignore="MissingTranslation">━━━ Screen-Off Time ━━━</string>
+    <string name="notif_session_heading" tools:ignore="MissingTranslation">━━━ Session ━━━</string>
+    <string name="notif_rate_and_duration" tools:ignore="MissingTranslation">%1$s: %2$s (%3$s)</string>
+    <string name="notif_time_and_share" tools:ignore="MissingTranslation">%1$s: %2$s [%3$.0f%%]</string>
+    <string name="notif_session_total" tools:ignore="MissingTranslation">Total: %1$s in %2$s</string>
+    <string name="notif_session_average" tools:ignore="MissingTranslation">Average: %1$s</string>
+    <string name="dozing" tools:ignore="MissingTranslation">Dozing</string>
     <string name="notif_last_reading">Last reading: %1$s</string>
     <string name="notif_drain_channel_description">Recorded screen-on and screen-off battery drain</string>
-    <string name="notif_screen_off_times">While screen off: CPU awake %1$s · Deep sleep %2$s</string>
-    <string name="notif_recorded_drain">Recorded drain: %1$s over %2$s</string>
-    <string name="notif_drain_average_note">Rates average recorded discharge. Powered time is excluded.</string>
     <string name="statistics_accounting_note">Android battery accounting since its last reset or charge-cycle reset. Energy and capacity are system estimates; app percentages use full battery capacity.</string>
     <string name="screen_battery_share_format">%1$.1f%% of recorded battery time</string>
     <string name="device_full_idling_time">Device full idling</string>

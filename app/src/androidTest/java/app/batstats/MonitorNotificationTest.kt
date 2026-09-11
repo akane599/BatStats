@@ -8,6 +8,7 @@ import android.os.BatteryManager
 import android.os.Build
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.core.content.ContextCompat
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -76,8 +77,15 @@ class MonitorNotificationTest {
                         it.copy(showDrainNotification = drain, notificationStyleIndex = style)
                     }
                 }
-                compose.waitUntil(20_000) {
-                    monitor()?.let { notificationMatchesStyle(it, drain, style) } == true
+                try {
+                    compose.waitUntil(20_000) {
+                        monitor()?.let { notificationMatchesStyle(it, drain, style) } == true
+                    }
+                } catch (timeout: ComposeTimeoutException) {
+                    throw AssertionError(
+                        "Notification did not reach drain=$drain style=$style; ${notificationSummary(monitor())}",
+                        timeout
+                    )
                 }
                 val active = notifications.activeNotifications
                 assertEquals("Style switches must replace the foreground notification", 1,
@@ -163,6 +171,15 @@ class MonitorNotificationTest {
         } else if (drain) {
             text.contains(context.getString(R.string.screen_on)) && text.contains(context.getString(R.string.screen_off))
         } else text.contains(" · ")
+    }
+
+    private fun notificationSummary(notification: Notification?): String {
+        if (notification == null) return "notification=absent"
+        return "channel=${notification.channelId}, " +
+            "title=${notification.extras.getCharSequence(Notification.EXTRA_TITLE)}, " +
+            "text=${notification.extras.getCharSequence(Notification.EXTRA_TEXT)}, " +
+            "bigText=${notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)}, " +
+            "actions=${notification.actions.orEmpty().map { it.title }}"
     }
 
     private fun captureNotificationShade(name: String) {

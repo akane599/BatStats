@@ -33,10 +33,11 @@ import org.koin.core.context.GlobalContext
 
 @RunWith(AndroidJUnit4::class)
 class MonitorNotificationTest {
-    @get:Rule(order = 0) val permissions = GrantPermissionRule.grant(
+    @get:Rule(order = 0) val monitoringIsolation = TestMonitoring.withoutBootAutoStart()
+    @get:Rule(order = 1) val permissions = GrantPermissionRule.grant(
         *if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray()
     )
-    @get:Rule(order = 1) val compose = createAndroidComposeRule<BatteryMainActivity>()
+    @get:Rule(order = 2) val compose = createAndroidComposeRule<BatteryMainActivity>()
 
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val notifications get() = context.getSystemService(NotificationManager::class.java)
@@ -52,14 +53,12 @@ class MonitorNotificationTest {
                     temperatureWarningEnabled = false, dischargeAlertEnabled = false)
             }
         }
-        context.stopService(Intent(context, BatteryMonitorService::class.java))
-        compose.waitUntil(15_000) { !BatteryGraph.repo.isMonitoringFlow.value }
+        TestMonitoring.pauseWhenForegroundReady()
     }
 
     @After fun cleanup() {
         TestScreenshots.shell("cmd statusbar collapse")
-        context.stopService(Intent(context, BatteryMonitorService::class.java))
-        compose.waitUntil(15_000) { !BatteryGraph.repo.isMonitoringFlow.value }
+        TestMonitoring.pauseWhenForegroundReady()
         if (::originalSettings.isInitialized) runBlocking {
             BatteryGraph.settings.update { originalSettings }
         }
@@ -163,10 +162,14 @@ class MonitorNotificationTest {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val originalFlags = automation.serviceInfo.flags
         automation.serviceInfo = automation.serviceInfo.apply {
-            flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+            flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
         }
         val appName = context.getString(R.string.app_name)
         val pause = context.getString(R.string.pause_monitoring)
+        val detailMarker = if (name == "notification-drain") context.getString(R.string.notif_drain_average_note)
+            else context.getString(R.string.notif_voltage, "").trim()
         fun descendants(root: android.view.accessibility.AccessibilityNodeInfo): List<android.view.accessibility.AccessibilityNodeInfo> {
             val result = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
             val queue = java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
@@ -178,16 +181,43 @@ class MonitorNotificationTest {
             }
             return result
         }
-        fun shadeRoot() = automation.rootInActiveWindow
-            ?.takeIf { it.packageName?.toString() == "com.android.systemui" }
+        fun shadeRoots(): List<android.view.accessibility.AccessibilityNodeInfo> = automation.windows.mapNotNull { window ->
+            val bounds = android.graphics.Rect()
+            window.getBoundsInScreen(bounds)
+            window.root?.takeIf {
+                !bounds.isEmpty && it.packageName?.toString() == "com.android.systemui"
+            }
+        }
+        fun inNotificationHeader(node: android.view.accessibility.AccessibilityNodeInfo): Boolean {
+            var ancestor = node
+            repeat(8) {
+                if (ancestor.viewIdResourceName?.substringAfterLast('/') in setOf(
+                        "app_name_text", "notification_header", "notification_main_column",
+                        "status_bar_latest_event_content") ||
+                    ancestor.className?.toString()?.endsWith("ExpandableNotificationRow") == true) return true
+                ancestor = ancestor.parent ?: return false
+            }
+            return false
+        }
+        fun isAppHeader(node: android.view.accessibility.AccessibilityNodeInfo) = node.isVisibleToUser &&
+            listOf(node.text, node.contentDescription).any { it?.toString()?.contains(appName, ignoreCase = true) == true } &&
+            inNotificationHeader(node)
+        fun isPause(node: android.view.accessibility.AccessibilityNodeInfo) =
+            listOf(node.text, node.contentDescription).any { it?.toString()?.equals(pause, ignoreCase = true) == true }
         fun pauseVisible(root: android.view.accessibility.AccessibilityNodeInfo): Boolean =
-            descendants(root).any { it.isVisibleToUser && it.text?.toString()?.equals(pause, ignoreCase = true) == true }
+            descendants(root).any { it.isVisibleToUser && isPause(it) }
+        fun detailsVisible(root: android.view.accessibility.AccessibilityNodeInfo): Boolean =
+            descendants(root).any { it.isVisibleToUser && it.text?.toString()?.contains(detailMarker) == true }
+        fun expandedVisible(root: android.view.accessibility.AccessibilityNodeInfo) = pauseVisible(root) && detailsVisible(root)
+        fun ownNotificationVisible(root: android.view.accessibility.AccessibilityNodeInfo): Boolean =
+            descendants(root).any { isAppHeader(it) || (it.isVisibleToUser && isPause(it)) }
         fun expandOwnNotification(root: android.view.accessibility.AccessibilityNodeInfo): Boolean {
             // Start at our app header so another app's expand button cannot be selected.
-            var node = descendants(root).firstOrNull {
-                it.isVisibleToUser && it.text?.toString()?.contains(appName, ignoreCase = true) == true
-            } ?: return false
+            var node = descendants(root).firstOrNull(::isAppHeader) ?: return false
             repeat(7) {
+                if (node.viewIdResourceName?.substringAfterLast('/') in setOf(
+                        "notification_stack_scroller", "notification_panel", "notification_shade",
+                        "notification_container_parent", "status_bar")) return false
                 if (node.actionList.any { it.id == android.view.accessibility.AccessibilityNodeInfo.ACTION_EXPAND }) {
                     return node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_EXPAND)
                 }
@@ -203,29 +233,44 @@ class MonitorNotificationTest {
             }
             return false
         }
+        fun revealPause(root: android.view.accessibility.AccessibilityNodeInfo): Boolean {
+            // Large fonts can place expanded actions below the viewport. Ask the action's
+            // ancestor scroller to reveal it without tapping the action or notification.
+            val action = descendants(root).firstOrNull(::isPause) ?: return false
+            return !action.isVisibleToUser && action.performAction(
+                android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id
+            )
+        }
         try {
             TestScreenshots.shell("cmd statusbar expand-notifications")
             val deadline = android.os.SystemClock.uptimeMillis() + 15_000L
             var lastExpansion = 0L
             var expanded = false
             while (android.os.SystemClock.uptimeMillis() < deadline) {
-                val root = shadeRoot()
-                if (root != null && pauseVisible(root)) {
+                val roots = shadeRoots().filter(::ownNotificationVisible)
+                if (roots.any(::expandedVisible)) {
                     // Accessibility can update before the expansion animation is drawn.
                     android.os.SystemClock.sleep(300L)
-                    if (shadeRoot()?.let(::pauseVisible) == true) { expanded = true; break }
+                    if (shadeRoots().any(::expandedVisible)) { expanded = true; break }
                 }
                 val now = android.os.SystemClock.uptimeMillis()
-                if (root != null && now - lastExpansion >= 1_000L && expandOwnNotification(root)) lastExpansion = now
+                if (now - lastExpansion >= 1_000L && roots.any {
+                    expandOwnNotification(it) || revealPause(it)
+                }) lastExpansion = now
                 android.os.SystemClock.sleep(100L)
             }
             if (!expanded) {
                 automation.takeScreenshot()?.let { failed ->
                     try { TestScreenshots.save("$name-failure", failed) } finally { failed.recycle() }
                 }
-                val visible = automation.rootInActiveWindow?.let(::descendants)?.filter { it.isVisibleToUser }
-                    ?.joinToString(" | ") { "${it.viewIdResourceName}: ${it.text} (${it.contentDescription})" }
-                fail("Expanded BatStats notification with Pause was not visible: ${visible?.take(8_000)}")
+                val visible = automation.windows.joinToString("\n") { window ->
+                    val root = window.root
+                    "Window ${window.id}, ${root?.packageName}: " + root?.let(::descendants)
+                        ?.filter { it.isVisibleToUser }?.joinToString(" | ") {
+                            "${it.viewIdResourceName}: ${it.text} (${it.contentDescription})"
+                        }
+                }
+                fail("Expanded BatStats notification with Pause was not visible: ${visible.take(12_000)}")
             }
             val bitmap = requireNotNull(automation.takeScreenshot())
             try { TestScreenshots.save(name, bitmap) } finally { bitmap.recycle() }
@@ -234,11 +279,11 @@ class MonitorNotificationTest {
                 TestScreenshots.shell("cmd statusbar collapse")
                 val deadline = android.os.SystemClock.uptimeMillis() + 8_000L
                 while (android.os.SystemClock.uptimeMillis() < deadline &&
-                    automation.rootInActiveWindow?.packageName?.toString() != context.packageName) {
+                    shadeRoots().any(::ownNotificationVisible)) {
                     android.os.SystemClock.sleep(100L)
                 }
-                assertEquals("Notification shade must close before the next style switch", context.packageName,
-                    automation.rootInActiveWindow?.packageName?.toString())
+                assertFalse("Notification shade must close before the next style switch",
+                    shadeRoots().any(::ownNotificationVisible))
             } finally {
                 automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
             }

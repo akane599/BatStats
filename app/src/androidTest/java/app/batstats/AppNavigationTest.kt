@@ -11,11 +11,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import app.batstats.battery.BatteryMainActivity
-import app.batstats.battery.BatteryGraph
-import app.batstats.battery.service.BatteryMonitorService
 import app.batstats.battery.util.DetailedStatsCollector
 import app.batstats.battery.util.ShellRunner
-import kotlinx.coroutines.runBlocking
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import org.junit.*
 import org.junit.runner.RunWith
@@ -25,16 +22,14 @@ import org.koin.core.context.GlobalContext
 @RunWith(AndroidJUnit4::class)
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class AppNavigationTest {
-    @get:Rule(order = 0) val permissions = GrantPermissionRule.grant(
+    @get:Rule(order = 0) val monitoringIsolation = TestMonitoring.withoutBootAutoStart()
+    @get:Rule(order = 1) val permissions = GrantPermissionRule.grant(
         *if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray()
     )
-    @get:Rule(order = 1) val compose = createAndroidComposeRule<BatteryMainActivity>()
+    @get:Rule(order = 2) val compose = createAndroidComposeRule<BatteryMainActivity>()
 
     @Before fun startWithMonitoringPaused() {
-        // A delayed BOOT_COMPLETED can arrive just after a freshly installed test app.
-        runBlocking { BatteryGraph.settings.update { it.copy(autoStartOnBoot = false) } }
-        compose.activity.stopService(Intent(compose.activity, BatteryMonitorService::class.java))
-        compose.waitUntil(15_000) { !BatteryGraph.repo.isMonitoringFlow.value }
+        TestMonitoring.pauseWhenForegroundReady()
         compose.waitForIdle()
     }
 
@@ -45,7 +40,7 @@ class AppNavigationTest {
     }
 
     @After fun cleanup() {
-        compose.activity.stopService(Intent(compose.activity, BatteryMonitorService::class.java))
+        TestMonitoring.pauseWhenForegroundReady()
     }
 
     @Test fun mainDestinationsSearchAndDataActionsRemainReachable() {

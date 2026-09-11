@@ -22,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,6 +86,8 @@ private fun DetailedStatsContent(
     val capacityMah by vm.capacityMah.collectAsStateWithLifecycle()
 
     val scope = rememberCoroutineScope()
+    var showResetDialog by rememberSaveable { mutableStateOf(false) }
+    var resetting by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val snackbarHost = remember { SnackbarHostState() }
 
@@ -148,17 +151,8 @@ private fun DetailedStatsContent(
                             Icon(Icons.Outlined.Refresh, "Refresh")
                         }
                     }
-                    IconButton(onClick = {
-                        scope.launch {
-                            if (vm.resetStats()) {
-                                snackbarHost.showSnackbar("Stats reset successfully")
-                                vm.refresh()
-                            } else {
-                                snackbarHost.showSnackbar("Failed to reset stats")
-                            }
-                        }
-                    }) {
-                        Icon(Icons.Outlined.RestartAlt, "Reset stats")
+                    IconButton(onClick = { showResetDialog = true }, enabled = hasAdvanced && !isRefreshing && !resetting) {
+                        Icon(Icons.Outlined.RestartAlt, stringResource(R.string.reset_action))
                     }
                 },
                 scrollBehavior = scrollBehavior
@@ -171,64 +165,6 @@ private fun DetailedStatsContent(
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            if (!hasAdvanced) {
-                PrivilegeRequiredCard(
-                    hasShizuku = hasShizuku,
-                    hasAdb = hasAdb,
-                    hasRoot = hasRoot,
-                    shizukuRunning = shizukuRunning,
-                    shizukuDenied = shizukuDenied,
-                    onRequestShizuku = { vm.requestShizukuPermission() },
-                    onRecheck = { vm.recheck() }
-                )
-            } else {
-                // Tab row
-                SecondaryScrollableTabRow(
-                    selectedTabIndex = pagerState.currentPage,
-                    edgePadding = 16.dp,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    divider = {}
-                ) {
-                    tabs.forEachIndexed { index, tab ->
-                        Tab(
-                            selected = pagerState.currentPage == index,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                            text = { Text(tab.title) },
-                            icon = { Icon(tab.icon, null, Modifier.size(18.dp)) }
-                        )
-                    }
-                }
-
-                HorizontalDivider()
-
-                // Running via ADB means dumpsys executes as BatStats itself, and Android
-                // filters the dump's uid -> package map to packages this app may see - so
-                // most rows degrade to "uid:NNNNN". Shizuku runs it as shell, which sees
-                // everything. Say so rather than silently showing worse data.
-                if (advMode == ShellRunner.Mode.ADB && shizukuRunning && !hasShizuku) {
-                    AdbNameLimitNote(
-                        denied = shizukuDenied,
-                        onRequestShizuku = { vm.requestShizukuPermission() }
-                    )
-                }
-
-                // Pager content
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize()
-                ) { page ->
-                    when (page) {
-                        0 -> OverviewTab(snapshot, deviceIdle, powerManager)
-                        1 -> AppsTab(snapshot?.apps ?: emptyList(), capacityMah)
-                        2 -> WakelocksTab(snapshot?.wakelocks ?: emptyList(), snapshot?.kernelWakelocks ?: emptyList())
-                        3 -> NetworkTab(snapshot?.network ?: emptyList())
-                        4 -> AlarmsJobsTab(snapshot?.alarms ?: emptyList(), snapshot?.jobs ?: emptyList(), snapshot?.syncs ?: emptyList())
-                        5 -> SystemTab(snapshot, deviceIdle, powerManager)
-                        6 -> RootTab(hasRoot, kernelBattery, onRefresh = { vm.refreshRootStats() })
-                    }
-                }
-            }
-
             AnimatedVisibility(visible = error != null) {
                 // Kept as a persistent card rather than a snackbar: the message explains how
                 // to fix the problem, and a snackbar disappears before it can be read.
@@ -267,7 +203,89 @@ private fun DetailedStatsContent(
                     }
                 }
             }
+
+            if (!hasAdvanced) {
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                PrivilegeRequiredCard(
+                    hasShizuku = hasShizuku,
+                    hasAdb = hasAdb,
+                    hasRoot = hasRoot,
+                    shizukuRunning = shizukuRunning,
+                    shizukuDenied = shizukuDenied,
+                    onRequestShizuku = { vm.requestShizukuPermission() },
+                    onRecheck = { vm.recheck() }
+                )
+                }
+            } else {
+                // Tab row
+                SecondaryScrollableTabRow(
+                    selectedTabIndex = pagerState.currentPage,
+                    edgePadding = 16.dp,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    divider = {}
+                ) {
+                    tabs.forEachIndexed { index, tab ->
+                        Tab(
+                            selected = pagerState.currentPage == index,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                            text = { Text(tab.title) },
+                            icon = { Icon(tab.icon, null, Modifier.size(18.dp)) }
+                        )
+                    }
+                }
+
+                HorizontalDivider()
+
+                // Running via ADB means dumpsys executes as BatStats itself, and Android
+                // filters the dump's uid -> package map to packages this app may see - so
+                // most rows degrade to "uid:NNNNN". Shizuku runs it as shell, which sees
+                // everything. Say so rather than silently showing worse data.
+                if (advMode == ShellRunner.Mode.ADB && shizukuRunning && !hasShizuku) {
+                    AdbNameLimitNote(
+                        denied = shizukuDenied,
+                        onRequestShizuku = { vm.requestShizukuPermission() }
+                    )
+                }
+
+                // Pager content
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.weight(1f)
+                ) { page ->
+                    when (page) {
+                        0 -> OverviewTab(snapshot, deviceIdle, powerManager)
+                        1 -> AppsTab(snapshot?.apps ?: emptyList(), capacityMah)
+                        2 -> WakelocksTab(snapshot?.wakelocks ?: emptyList(), snapshot?.kernelWakelocks ?: emptyList())
+                        3 -> NetworkTab(snapshot?.network ?: emptyList())
+                        4 -> AlarmsJobsTab(snapshot?.alarms ?: emptyList(), snapshot?.jobs ?: emptyList(), snapshot?.syncs ?: emptyList())
+                        5 -> SystemTab(snapshot, deviceIdle, powerManager)
+                        6 -> RootTab(hasRoot, kernelBattery, onRefresh = { vm.refreshRootStats() })
+                    }
+                }
+            }
+
+
         }
+    }
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            title = { Text(stringResource(R.string.reset_stats_title)) },
+            text = { Text(stringResource(R.string.reset_stats_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showResetDialog = false
+                    resetting = true
+                    scope.launch {
+                        try {
+                            if (vm.resetStats()) { vm.refresh(); snackbarHost.showSnackbar("Stats reset successfully") }
+                            else snackbarHost.showSnackbar("Failed to reset stats")
+                        } finally { resetting = false }
+                    }
+                }) { Text(stringResource(R.string.reset_action)) }
+            },
+            dismissButton = { TextButton(onClick = { showResetDialog = false }) { Text(stringResource(R.string.cancel)) } }
+        )
     }
 }
 

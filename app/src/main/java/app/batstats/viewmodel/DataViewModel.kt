@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import app.batstats.battery.data.ExportImportManager
 import app.batstats.settings.AppSettings
 import io.github.mlmgames.settings.core.SettingsRepository
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,8 +32,9 @@ class DataViewModel(
      * firstLaunchTime, totalSamplesCollected and lastExportTime were all being written and
      * never read. They belong here: you are about to export, so this is what there is.
      */
-    val summary: StateFlow<DataSummary> = settingsRepository.flow
-        .map { DataSummary(it.firstLaunchTime, it.totalSamplesCollected, it.lastExportTime) }
+    val summary: StateFlow<DataSummary> = combine(settingsRepository.flow, exportImportManager.sampleCount) { settings, count ->
+        DataSummary(settings.firstLaunchTime, count, settings.lastExportTime)
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DataSummary())
 
     private val _isBusy = MutableStateFlow(false)
@@ -54,9 +57,9 @@ class DataViewModel(
         exportImportManager.exportJson(uri, from, to, includeSamples, includeSessions)
     }
 
-    fun exportCsv(uri: Uri, from: Long, to: Long) =
+    fun exportCsv(uri: Uri, from: Long, to: Long, includeSamples: Boolean = true, includeSessions: Boolean = true) =
         runOperation("CSV Exported Successfully", "Export Failed", export = true) {
-            exportImportManager.exportCsvToFolder(uri, from, to)
+            exportImportManager.exportCsvToFolder(uri, from, to, includeSamples, includeSessions)
         }
 
     fun importJson(uri: Uri) = runOperation("JSON Imported Successfully", "Import Failed") {
@@ -84,8 +87,13 @@ class DataViewModel(
                     settingsRepository.update { it.copy(lastExportTime = System.currentTimeMillis()) }
                 }
                 _message.value = if (success) successMessage else failureMessage
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _message.value = failureMessage
             } finally {
                 _isBusy.value = false
             }
         }
     }
+}

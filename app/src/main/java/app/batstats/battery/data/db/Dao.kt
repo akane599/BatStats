@@ -11,11 +11,35 @@ interface BatteryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSamples(samples: List<BatterySample>)
 
+    @Query("SELECT COUNT(*) FROM battery_samples")
+    fun sampleCount(): Flow<Long>
+
+    @Query("SELECT timestamp FROM battery_samples WHERE timestamp IN (:timestamps)")
+    suspend fun existingTimestamps(timestamps: List<Long>): List<Long>
+
+    @Query("SELECT * FROM battery_samples WHERE timestamp BETWEEN :from AND :to AND id > :afterId ORDER BY id LIMIT :limit")
+    suspend fun exportPage(from: Long, to: Long, afterId: Long, limit: Int): List<BatterySample>
+
     @Query("SELECT * FROM battery_samples ORDER BY timestamp DESC LIMIT 1")
     suspend fun lastSample(): BatterySample?
 
     @Query("SELECT * FROM battery_samples WHERE timestamp BETWEEN :from AND :to ORDER BY timestamp ASC")
     fun samplesBetween(from: Long, to: Long): Flow<List<BatterySample>>
+
+    @Query("SELECT MIN(timestamp) AS timestamp, AVG(currentNowUa) / 1000.0 AS currentMa FROM battery_samples WHERE timestamp BETWEEN :from AND :to AND currentNowUa IS NOT NULL GROUP BY timestamp / :bucketMs ORDER BY timestamp")
+    fun currentChart(from: Long, to: Long, bucketMs: Long): Flow<List<BatteryCurrentPoint>>
+
+    @Query("SELECT MIN(timestamp) AS timestamp, AVG(currentNowUa) / 1000.0 AS currentMa, AVG(voltageMv) AS voltageMv, AVG(temperatureDeciC) / 10.0 AS tempC FROM battery_samples WHERE timestamp BETWEEN :from AND :to GROUP BY timestamp / :bucketMs ORDER BY timestamp")
+    fun sessionChart(from: Long, to: Long, bucketMs: Long): Flow<List<BatteryChartPoint>>
+
+    @Query("SELECT AVG(currentNowUa) FROM battery_samples WHERE timestamp BETWEEN :from AND :to")
+    suspend fun averageCurrent(from: Long, to: Long): Double?
+
+    @Query("SELECT * FROM battery_samples WHERE timestamp BETWEEN :from AND :to AND chargeCounterUah IS NOT NULL ORDER BY timestamp ASC LIMIT 1")
+    suspend fun firstCounter(from: Long, to: Long): BatterySample?
+
+    @Query("SELECT * FROM battery_samples WHERE timestamp BETWEEN :from AND :to AND chargeCounterUah IS NOT NULL ORDER BY timestamp DESC LIMIT 1")
+    suspend fun lastCounter(from: Long, to: Long): BatterySample?
 
     @Query("DELETE FROM battery_samples WHERE timestamp < :olderThan")
     suspend fun purge(olderThan: Long)
@@ -41,6 +65,9 @@ interface SessionDao {
 
     @Query("SELECT * FROM charge_sessions ORDER BY startTime DESC LIMIT :limit OFFSET :offset")
     fun sessionsPaged(limit: Int, offset: Int): Flow<List<ChargeSession>>
+
+    @Query("SELECT * FROM charge_sessions ORDER BY startTime DESC")
+    fun allSessions(): Flow<List<ChargeSession>>
 
     @Query("SELECT * FROM charge_sessions WHERE sessionId = :id")
     fun session(id: String): Flow<ChargeSession?>
@@ -97,7 +124,7 @@ interface AppEnergyDao {
     @Query("""
         SELECT packageName AS packageName, SUM(energyMah) AS energyMah, SUM(samples) AS samples
         FROM app_energy_stats
-        WHERE bucketStart BETWEEN :from AND :to AND mode = :mode
+        WHERE bucketStart BETWEEN :from AND :to AND (mode = :mode OR (:mode = 'MEASURED' AND mode != 'HEURISTIC'))
         GROUP BY packageName
         ORDER BY energyMah DESC
         LIMIT :limit
@@ -113,7 +140,7 @@ interface AppEnergyDao {
     @Query("""
         SELECT packageName AS packageName, SUM(energyMah) AS energyMah, SUM(samples) AS samples
         FROM app_energy_stats
-        WHERE bucketStart BETWEEN :from AND :to AND mode = :mode
+        WHERE bucketStart BETWEEN :from AND :to AND (mode = :mode OR (:mode = 'MEASURED' AND mode != 'HEURISTIC'))
         GROUP BY packageName
         ORDER BY energyMah DESC
     """)
@@ -140,3 +167,8 @@ private fun hourBucketStart(ms: Long): Long {
     val hourMs = 60 * 60 * 1000L
     return (ms / hourMs) * hourMs
 }
+
+/** One averaged chart bucket, keeping long-range charts bounded in memory. */
+data class BatteryCurrentPoint(val timestamp: Long, val currentMa: Double?)
+
+data class BatteryChartPoint(val timestamp: Long, val currentMa: Double?, val voltageMv: Double?, val tempC: Double?)

@@ -29,7 +29,6 @@ class ForegroundDrainTracker(
 
     /** Measured separately per screen state: the two idle draws are nothing alike. */
     private val screenOnBaseline = IdleBaseline()
-    private val screenOffBaseline = IdleBaseline()
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -44,16 +43,18 @@ class ForegroundDrainTracker(
                 // uncapped this would attribute hours of drain to it on a single reading.
                 val dtHours = ((now - lastTs).coerceIn(0L, MAX_ATTRIBUTED_GAP_MS)) / 3_600_000.0
 
-                val pkg = currentForegroundPackage() ?: lastPkg
+                val screenOn = rt.sample?.screenOn == true
+                val pkg = if (screenOn && hasUsageAccess()) {
+                    currentForegroundPackage(lastTs, lastPkg)
+                } else null
 
                 // Only discharge is attributable. The current is positive on the charger, so
                 // taking its magnitude used to credit a fast charge to whatever app happened
                 // to be open - 1500 mA of charging read as 1420 mA of "excess app drain".
                 val discharging = rt.plugged == 0 && rt.currentMa < 0
-                if (discharging) {
-                    val screenOn = rt.sample?.screenOn == true
+                if (discharging && screenOn) {
                     val ma = abs(rt.currentMa.toDouble())
-                    val baselines = if (screenOn) screenOnBaseline else screenOffBaseline
+                    val baselines = screenOnBaseline
                     baselines.observe(ma)
 
                     val baseline = baselines.baselineMilliAmps()
@@ -98,13 +99,13 @@ class ForegroundDrainTracker(
         )
     }
 
-    private fun currentForegroundPackage(): String? {
+    private fun currentForegroundPackage(since: Long, previous: String?): String? {
         val usm = context.getSystemService(UsageStatsManager::class.java) ?: return null
         val end = System.currentTimeMillis()
-        val begin = end - 60_000L
+        val begin = since.coerceIn(end - MAX_ATTRIBUTED_GAP_MS, end)
 
         // API 35+: narrow the query to relevant event types
-        val events = if (Build.VERSION.SDK_INT >= 35) {
+        val events = try { if (Build.VERSION.SDK_INT >= 35) {
             val q = UsageEventsQuery.Builder(begin, end)
                 .setEventTypes(
                     UsageEvents.Event.ACTIVITY_RESUMED,
@@ -115,16 +116,17 @@ class ForegroundDrainTracker(
             usm.queryEvents(q)
         } else {
             usm.queryEvents(begin, end)
-        } ?: return null
+        } } catch (_: SecurityException) { null } ?: return null
 
-        var lastPkg: String? = null
-        var lastTs = -1L
+        var lastPkg = previous
         val e = UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(e)
-            if (e.eventType == UsageEvents.Event.ACTIVITY_RESUMED && e.timeStamp >= lastTs) {
-                lastTs = e.timeStamp
+            if (e.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
                 lastPkg = e.packageName
+            } else if (e.packageName == lastPkg &&
+                (e.eventType == UsageEvents.Event.ACTIVITY_PAUSED || e.eventType == UsageEvents.Event.ACTIVITY_STOPPED)) {
+                lastPkg = null
             }
         }
         return lastPkg

@@ -377,7 +377,9 @@ object BatteryStatsParser {
                     // Power summary: 9,0,l,pws,capacity,computed,minDrained,maxDrained
                     parts[2] == "l" && parts[3] == "pws" -> {
                         // Capacity is formatted as mAh and may carry decimals.
-                        estCapacity = parts.getOrNull(4)?.toDoubleOrNull()?.roundToLong()?.toInt() ?: 0
+                        estCapacity = parts.getOrNull(4)?.toDoubleOrNull()
+                            ?.takeIf { it.isFinite() && it in 1.0..Int.MAX_VALUE.toDouble() }
+                            ?.roundToLong()?.toInt() ?: 0
                     }
 
                     // Process stats: 9,<uid>,l,pr,<process>,<user>,<sys>,<fg>,<starts>
@@ -591,7 +593,7 @@ object BatteryStatsParser {
     ) {
         val uid = parts[1].toIntOrNull() ?: return
         val type = parts.getOrNull(4) ?: return
-        val mah = parts.getOrNull(5)?.toDoubleOrNull() ?: 0.0
+        val mah = parts.getOrNull(5)?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: return
 
         // 9,<uid>,l,pwi,<label>,<mAh>,<shouldHide>,<screenMah>,<smearMah>
         // Only rows labelled "uid" are per-app; the rest are device-wide component totals
@@ -602,7 +604,7 @@ object BatteryStatsParser {
             // figures sums to the total. Column 8 does not - on a real device it came back
             // larger than the app's own total - so it is left alone until it can be
             // explained rather than surfaced as a number nobody can act on.
-            val screen = parts.getOrNull(7)?.toDoubleOrNull() ?: 0.0
+            val screen = parts.getOrNull(7)?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
             val existing = appStats[uid] ?: AppPowerStats(uid = uid, packageName = pkg, powerMah = 0.0)
             appStats[uid] = existing.copy(
                 powerMah = existing.powerMah + mah,

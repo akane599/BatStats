@@ -5,6 +5,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BatteryCsvTest {
+    @Test fun `new session archives retain automatic tracking flag`() {
+        assertTrue(BatteryCsv.parseSession("auto,CHARGE,1000,,50,,,,,true").autoStarted)
+        assertFalse(BatteryCsv.parseSession("manual,CHARGE,1000,,50,,,,").autoStarted)
+    }
     @Test fun `sample preserves missing measurements and signed current`() {
         val sample = BatteryCsv.parseSample("1000,80,3,0,-120000,,4000,320,,true")
         assertEquals(80, sample.levelPercent)

@@ -138,10 +138,16 @@ class AdvancedDrainTracker(
                     // Close the running segment so its charge delta is measured and booked,
                     // then start the next one from here.
                     advanceLedger()
+                    val sessionAtStart = sessionStartTime
                     takeSnapshot()?.let { snapshot ->
-                        _snapshots.update { (it + snapshot).takeLast(1000) }
+                        currentCoroutineContext().ensureActive()
+                        synchronized(ledgerLock) {
+                            if (running.get() && sessionAtStart == sessionStartTime) {
+                                _snapshots.update { (it + snapshot).takeLast(1000) }
+                            }
+                        }
                     }
-                    updateDrainState()
+                    if (running.get()) updateDrainState()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -306,6 +312,8 @@ class AdvancedDrainTracker(
                 cpuAwakeTimeMs = cpuAwakeTime,
                 deepSleepTimeMs = deepSleepTime
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to take snapshot", e)
             null

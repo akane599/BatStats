@@ -76,9 +76,10 @@ class DrainNotificationManager(
     private fun buildNotification(state: DrainState): Notification {
         val contentIntent = PendingIntent.getActivity(
             context,
-            0,
+            2001,
             Intent(context, BatteryMainActivity::class.java).apply {
                 putExtra("open_drain_stats", true)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )

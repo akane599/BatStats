@@ -39,7 +39,7 @@ jobs:
     with:
       app-name: BatStats
       app-slug: batstats
-      application-id: app.batstats
+      application-id: org.mlm.batstats
       play-track: ${{ inputs.play_track || 'none' }}
       bump-type: ${{ inputs.bump_type }}
     secrets:

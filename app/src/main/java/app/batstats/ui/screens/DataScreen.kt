@@ -5,6 +5,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Download
@@ -36,10 +39,10 @@ fun DataScreen(
     val message by vm.message.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
 
-    var from by remember { mutableLongStateOf(0L) }
-    var to by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    var includeSamples by remember { mutableStateOf(true) }
-    var includeSessions by remember { mutableStateOf(true) }
+    var from by rememberSaveable { mutableLongStateOf(0L) }
+    var to by rememberSaveable { mutableLongStateOf(0L) }
+    var includeSamples by rememberSaveable { mutableStateOf(true) }
+    var includeSessions by rememberSaveable { mutableStateOf(true) }
 
     LaunchedEffect(message) {
         message?.let {
@@ -57,7 +60,7 @@ fun DataScreen(
     val folderCsv = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { tree: Uri? ->
-        if (tree != null) vm.exportCsv(tree, from, to)
+        if (tree != null) vm.exportCsv(tree, from, to, includeSamples, includeSessions)
     }
 
     val openJson = rememberLauncherForActivityResult(
@@ -89,6 +92,7 @@ fun DataScreen(
             Modifier
                 .padding(pv)
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -97,16 +101,16 @@ fun DataScreen(
             ElevatedCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(stringResource(R.string.date_range), style = MaterialTheme.typography.titleMedium)
-                    DateRangeRow(from = from, to = to, onFrom = { from = it }, onTo = { to = it })
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    DateRangeRow(from = from, onFrom = { from = it })
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         FilterChip(
                             selected = includeSamples,
-                            onClick = { includeSamples = !includeSamples },
+                            onClick = { includeSamples = !includeSamples }, enabled = !isBusy,
                             label = { Text(stringResource(R.string.samples)) }
                         )
                         FilterChip(
                             selected = includeSessions,
-                            onClick = { includeSessions = !includeSessions },
+                            onClick = { includeSessions = !includeSessions }, enabled = !isBusy,
                             label = { Text(stringResource(R.string.sessions)) }
                         )
                     }
@@ -123,14 +127,15 @@ fun DataScreen(
                         Text(stringResource(R.string.export), style = MaterialTheme.typography.titleMedium)
                         Icon(Icons.Outlined.Download, null)
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { createJson.launch("BatteryExport.json") }, enabled = !isBusy) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { createJson.launch("BatteryExport.json") }, enabled = !isBusy && (includeSamples || includeSessions)) {
                             Text(stringResource(R.string.export_json))
                         }
-                        OutlinedButton(onClick = { folderCsv.launch(null) }, enabled = !isBusy) {
+                        OutlinedButton(onClick = { folderCsv.launch(null) }, enabled = !isBusy && (includeSamples || includeSessions)) {
                             Text(stringResource(R.string.export_csv_folder))
                         }
                     }
+                    if (!includeSamples && !includeSessions) Text(stringResource(R.string.export_selection_required), color = MaterialTheme.colorScheme.error)
                     AnimatedVisibility(visible = isBusy) {
                         LinearWavyProgressIndicator(Modifier.fillMaxWidth())
                     }
@@ -147,7 +152,7 @@ fun DataScreen(
                         Text(stringResource(R.string.import_string), style = MaterialTheme.typography.titleMedium)
                         Icon(Icons.Outlined.Upload, null)
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = { openJson.launch(arrayOf("application/json")) },
                             enabled = !isBusy
@@ -161,6 +166,8 @@ fun DataScreen(
                         stringResource(R.string.csv_import_hint),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Text(stringResource(R.string.json_size_hint), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -168,7 +175,7 @@ fun DataScreen(
 }
 
 @Composable
-private fun DateRangeRow(from: Long, to: Long, onFrom: (Long) -> Unit, onTo: (Long) -> Unit) {
+private fun DateRangeRow(from: Long, onFrom: (Long) -> Unit) {
     val df = remember(Locale.getDefault()) {
         DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault())
     }
@@ -181,8 +188,8 @@ private fun DateRangeRow(from: Long, to: Long, onFrom: (Long) -> Unit, onTo: (Lo
             if (from == 0L) stringResource(R.string.from_beginning)
             else stringResource(R.string.from_date, format(from))
         )
-        Text(stringResource(R.string.to_date, format(to)))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.to_date, stringResource(R.string.now_label)))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { onFrom(0L) }) { Text(stringResource(R.string.all)) }
             OutlinedButton(onClick = { onFrom(System.currentTimeMillis() - 7L * 24 * 3600000) }) { Text(stringResource(R.string.last_7_days)) }
             OutlinedButton(onClick = { onFrom(System.currentTimeMillis() - 30L * 24 * 3600000) }) { Text(stringResource(R.string.last_30_days)) }

@@ -47,6 +47,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -67,19 +69,12 @@ jobs:
         env:
           BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
           ABI: ${{ inputs.abi || 'arm64-v8a' }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           # Capitalise for the Gradle task name: assembleDebug / assembleRelease.
           task="assemble$(printf '%s' "${BUILD_TYPE:0:1}" | tr '[:lower:]' '[:upper:]')${BUILD_TYPE:1}"
           echo "task=$task" >> "$GITHUB_OUTPUT"
           echo "build_type=$BUILD_TYPE" >> "$GITHUB_OUTPUT"
-
-          # On a pull_request event github.sha is the *merge* commit GitHub built, not the
-          # commit that was pushed, so artifacts were named after a SHA that appears nowhere
-          # in the branch. Prefer the head SHA, and shorten it to something readable.
-          sha="${HEAD_SHA:-$GITHUB_SHA}"
-          echo "sha=${sha:0:8}" >> "$GITHUB_OUTPUT"
 
           # "all" keeps the project defaults (every split plus universal). A single ABI keeps
           # CI fast; "universal" turns splitting off and builds one fat APK.
@@ -149,4 +144,33 @@ jobs:
           {
             echo "### APKs"
             echo
-            echo "Variant: \`${{ steps.params.outputs.build_type }}\` · Commit: \`${{ steps.params.outputs.sha }}\`"
+            echo "Variant: \`${{ steps.params.outputs.build_type }}\`"
+            echo
+            echo '| File | Size | Signature verified |'
+            echo '| --- | --- | --- |'
+            # The apk-dist plugin also leaves the raw AGP names behind; list the friendly ones.
+            for apk in "$dir"/batstats-*.apk; do
+              [ -e "$apk" ] || continue
+              signed='No (unsigned; sign before installing)'
+              if "$apksigner" verify "$apk" >/dev/null 2>&1; then
+                signed='Yes'
+              elif [ '${{ steps.params.outputs.build_type }}' = debug ]; then
+                echo "::error::Debug APK failed signature verification: $apk" >&2
+                exit 1
+              fi
+              printf '| %s | %s | %s |\n' "$(basename "$apk")" "$(du -h "$apk" | cut -f1)" "$signed"
+              (cd "$dir" && sha256sum "$(basename "$apk")") >> "$dir/SHA256SUMS"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          # A checksum file alone must not count as a successfully produced APK artifact.
+          test -s "$dir/SHA256SUMS"
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: batstats-${{ steps.params.outputs.build_type }}-${{ github.sha }}
+          path: |
+            app/build/outputs/apk/${{ steps.params.outputs.build_type }}/batstats-*.apk
+            app/build/outputs/apk/${{ steps.params.outputs.build_type }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30

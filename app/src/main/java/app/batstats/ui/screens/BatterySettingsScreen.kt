@@ -1,8 +1,13 @@
 package app.batstats.ui.screens
 
 import android.net.Uri
+import android.content.Intent
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,12 +20,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
@@ -60,11 +71,16 @@ fun BatterySettingsScreen(
     onBack: () -> Unit,
     onExportData: () -> Unit,
     initialCategory: String? = null,
+    onOpenAccess: () -> Unit = {},
     vm: SettingsViewModel = koinViewModel(),
     stringProvider: StringResourceProvider = koinInject()
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var query by rememberSaveable { mutableStateOf("") }
+    var showActions by rememberSaveable { mutableStateOf(false) }
+    var clearing by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val snackbarHost = remember { SnackbarHostState() }
 
@@ -104,7 +120,7 @@ fun BatterySettingsScreen(
         if (initialCategory != null) {
             val idx = categoryOrder.indexOfFirst { it.second == initialCategory }
             if (idx >= 0) {
-                val target = idx * 2
+                val target = idx * 2 + 2
                 // delay to allow LazyColumn to be composed
                 kotlinx.coroutines.delay(100)
                 listState.animateScrollToItem(target)
@@ -118,7 +134,7 @@ fun BatterySettingsScreen(
             LargeTopAppBar(
                 title = {
                     Column {
-                        Text(stringResource(R.string.batstats))
+                        Text(stringResource(R.string.settings))
                         Text(
                             stringResource(R.string.customize_behavior),
                             style = MaterialTheme.typography.labelMedium,
@@ -132,14 +148,11 @@ fun BatterySettingsScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { createSettingsBackup.launch("BatStats_Settings_Backup.json") }) {
-                        Icon(Icons.Outlined.Backup, contentDescription = stringResource(R.string.export_settings))
-                    }
-                    IconButton(onClick = { showImportDialog = true }) {
-                        Icon(Icons.Outlined.Restore, contentDescription = stringResource(R.string.import_settings_desc))
-                    }
-                    IconButton(onClick = { showResetDialog = true }) {
-                        Icon(Icons.Outlined.RestartAlt, contentDescription = stringResource(R.string.reset_settings_desc))
+                    IconButton(onClick = { showActions = true }) { Icon(Icons.Outlined.MoreVert, stringResource(R.string.settings_more)) }
+                    DropdownMenu(expanded = showActions, onDismissRequest = { showActions = false }) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.export_settings)) }, onClick = { showActions = false; createSettingsBackup.launch("BatStats_Settings_Backup.json") })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.import_settings_desc)) }, onClick = { showActions = false; showImportDialog = true })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.reset_settings_desc)) }, onClick = { showActions = false; showResetDialog = true })
                     }
                 },
                 scrollBehavior = scrollBehavior
@@ -150,11 +163,34 @@ fun BatterySettingsScreen(
         ProvideStringResources(stringProvider) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.padding(padding),
+                modifier = Modifier.padding(padding).testTag("settings_list"),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                item(key = "search") {
+                    OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        label = { Text(stringResource(R.string.search_settings)) },
+                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                        trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, stringResource(R.string.clear_search)) } })
+                }
+                item(key = "access") {
+                    OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(stringResource(R.string.background_access), style = MaterialTheme.typography.titleMedium)
+                            Text(stringResource(R.string.background_access_body), style = MaterialTheme.typography.bodySmall)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = onOpenAccess) { Text(stringResource(R.string.check_access)) }
+                                TextButton(onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }) { Text(stringResource(R.string.battery_system_settings)) }
+                                TextButton(onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) } }) { Text(stringResource(R.string.usage_access_settings)) }
+                            }
+                        }
+                    }
+                }
                 categoryOrder.forEach { (categoryClass, categoryTitle) ->
-                    val fields = grouped[categoryClass].orEmpty()
+                    val fields = grouped[categoryClass].orEmpty().filter { field ->
+                        query.isBlank() || field.meta?.title?.contains(query.trim(), true) == true ||
+                            field.meta?.description?.contains(query.trim(), true) == true || categoryTitle.contains(query.trim(), true)
+                    }
                     if (fields.isEmpty()) return@forEach
 
                     item(key = "header_$categoryTitle") {
@@ -359,6 +395,7 @@ fun BatterySettingsScreen(
     // Clear Data Dialog
     if (showClearDataDialog) {
         val dataClearedMsg = stringResource(R.string.data_cleared)
+        val clearFailedMsg = stringResource(R.string.data_clear_failed)
         AlertDialog(
             onDismissRequest = { showClearDataDialog = false },
             icon = { Icon(Icons.Outlined.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
@@ -367,13 +404,24 @@ fun BatterySettingsScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        scope.launch {
-                            vm.clearBatteryData()
-                            snackbarHost.showSnackbar(dataClearedMsg)
-                            showClearDataDialog = false
+                        if (!clearing) {
+                            clearing = true
+                            scope.launch {
+                                try {
+                                    vm.clearBatteryData()
+                                    showClearDataDialog = false
+                                    snackbarHost.showSnackbar(dataClearedMsg)
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (_: Exception) {
+                                    showClearDataDialog = false
+                                    snackbarHost.showSnackbar(clearFailedMsg)
+                                } finally { clearing = false }
+                            }
                         }
                     },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    enabled = !clearing,
                 ) { Text(stringResource(R.string.delete_all)) }
             },
             dismissButton = { TextButton(onClick = { showClearDataDialog = false }) { Text(stringResource(R.string.cancel)) } }

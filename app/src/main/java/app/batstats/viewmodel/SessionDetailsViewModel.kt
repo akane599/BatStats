@@ -5,64 +5,48 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.batstats.battery.data.BatteryRepository
 import app.batstats.battery.data.db.BatteryDatabase
-import app.batstats.battery.data.db.BatterySample
+import app.batstats.battery.data.db.BatteryChartPoint
+import app.batstats.battery.data.db.SessionType
+import app.batstats.settings.AppSettings
+import app.batstats.settings.useFahrenheit
+import io.github.mlmgames.settings.core.SettingsRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class SessionDetailsViewModel(
     app: Application,
     private val repo: BatteryRepository,
     private val db: BatteryDatabase,
-    private val sessionId: String
+    private val sessionId: String,
+    settings: SettingsRepository<AppSettings>
 ) : AndroidViewModel(app) {
-
-    data class Point(val currentMa: Int?, val voltageMv: Int?, val tempC: Double?)
     data class Ui(
-        val type: String = "",
+        val loading: Boolean = true,
+        val type: SessionType? = null,
         val start: Long = 0L,
         val end: Long? = null,
         val levelRange: String = "",
         val capacityMah: Int? = null,
         val avgCurrent: Long? = null,
-        val points: List<Point> = emptyList()
+        val points: List<BatteryChartPoint> = emptyList()
     )
-    private val _ui = MutableStateFlow(Ui())
-    val ui: StateFlow<Ui> = _ui.asStateFlow()
+    val fahrenheit = settings.flow.map { it.useFahrenheit }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    init {
-        viewModelScope.launch {
-            db.sessionDao().session(sessionId).combine(
-                repo.realtimeFlow
-            ) { session, _ -> session }.filterNotNull().collect { s ->
-                val end = s.endTime ?: System.currentTimeMillis()
-                val samples = repo.samplesBetween(s.startTime, end).first()
-
-                val startPct = (s.startLevel).coerceIn(0, 100)
-                val endPct = (s.endLevel ?: samples.lastOrNull()?.levelPercent ?: startPct).coerceIn(0, 100)
-
-                val points = aggregatePerMinute(samples)
-                _ui.value = Ui(
-                    type = s.type.name,
-                    start = s.startTime,
-                    end = s.endTime,
-                    levelRange = "$startPct% → $endPct%",
-                    capacityMah = s.estCapacityMah,
-                    avgCurrent = s.avgCurrentUa,
-                    points = points
-                )
-            }
+    val ui: StateFlow<Ui> = db.sessionDao().session(sessionId).flatMapLatest { session ->
+        if (session == null) return@flatMapLatest flowOf(Ui(loading = false))
+        // Closed sessions do not re-query on every live current reading. Aggregate in SQL
+        // before loading history, bounding even a months-long session to about 300 points.
+        val bounds = if (session.endTime != null) flowOf(session.endTime)
+            else repo.realtimeFlow.map { System.currentTimeMillis() }
+        bounds.flatMapLatest { end ->
+            db.batteryDao().sessionChart(session.startTime, end, ((end - session.startTime) / 300).coerceAtLeast(1000))
+                .map { points ->
+                    val endLevel = session.endLevel ?: repo.realtimeFlow.value.sample?.levelPercent ?: session.startLevel
+                    Ui(false, session.type, session.startTime, session.endTime,
+                        "${session.startLevel}% → $endLevel%", session.estCapacityMah, session.avgCurrentUa, points)
+                }
         }
-    }
-
-    private fun aggregatePerMinute(samples: List<BatterySample>): List<Point> {
-        if (samples.isEmpty()) return emptyList()
-        val byMinute = samples.groupBy { it.timestamp / 60000L }
-        return byMinute.toSortedMap().values.map { minute ->
-            val cur = minute.mapNotNull { it.currentNowUa }.average().takeIf { !it.isNaN() }?.div(1000.0)?.roundToInt()
-            val volt = minute.mapNotNull { it.voltageMv }.average().takeIf { !it.isNaN() }?.roundToInt()
-            val tempC = minute.mapNotNull { it.temperatureDeciC }.average().takeIf { !it.isNaN() }?.div(10.0)
-            Point(cur, volt, tempC)
-        }
-    }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Ui())
 }

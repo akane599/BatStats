@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,6 +40,7 @@ import app.batstats.battery.drain.formatDrainRateWithPercent
 import app.batstats.battery.drain.formatDuration
 import app.batstats.battery.drain.formatMahWithPercent
 import app.batstats.viewmodel.DrainStatsViewModel
+import app.batstats.viewmodel.DashboardViewModel
 import java.util.Locale
 import org.koin.androidx.compose.koinViewModel
 
@@ -46,10 +48,15 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun DrainStatsScreen(
     onBack: () -> Unit,
-    vm: DrainStatsViewModel = koinViewModel()
+    vm: DrainStatsViewModel = koinViewModel(),
+    monitorVm: DashboardViewModel = koinViewModel()
 ) {
+    var confirmReset by rememberSaveable { mutableStateOf(false) }
     val drainState by vm.drainState.collectAsStateWithLifecycle()
     val isTracking by vm.isTracking.collectAsStateWithLifecycle()
+    val isMonitoring by monitorVm.isMonitoring.collectAsStateWithLifecycle()
+    val monitorBusy by monitorVm.busy.collectAsStateWithLifecycle()
+    val monitorError by monitorVm.error.collectAsStateWithLifecycle()
     val snapshots by vm.snapshots.collectAsStateWithLifecycle()
     
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -77,15 +84,16 @@ fun DrainStatsScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { vm.resetSession() }) {
+                    IconButton(onClick = { confirmReset = true }) {
                         Icon(Icons.Outlined.RestartAlt, "Reset Session")
                     }
                     IconButton(
-                        onClick = { if (isTracking) vm.stopTracking() else vm.startTracking() }
+                        onClick = monitorVm::toggleMonitoring,
+                        enabled = !monitorBusy
                     ) {
                         Icon(
-                            if (isTracking) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            if (isTracking) "Pause" else "Start"
+                            if (isMonitoring) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            stringResource(if (isMonitoring) R.string.pause_monitoring else R.string.start_monitoring)
                         )
                     }
                 },
@@ -100,6 +108,16 @@ fun DrainStatsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            item {
+                Text(stringResource(R.string.drain_estimate_note), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            monitorError?.let { message ->
+                item {
+                    Text(stringResource(message), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = monitorVm::clearError) { Text(stringResource(R.string.dismiss)) }
+                }
+            }
             item {
                 CurrentStateCard(drainState)
             }
@@ -124,6 +142,15 @@ fun DrainStatsScreen(
             
             item { Spacer(Modifier.height(16.dp)) }
         }
+    }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text(stringResource(R.string.reset_drain_title)) },
+            text = { Text(stringResource(R.string.reset_drain_body)) },
+            confirmButton = { TextButton(onClick = { confirmReset = false; vm.resetSession() }) { Text(stringResource(R.string.reset_action)) } },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text(stringResource(R.string.cancel)) } }
+        )
     }
 }
 

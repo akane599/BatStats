@@ -4,9 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import app.batstats.battery.data.db.BatteryCurrentPoint
 import app.batstats.battery.data.db.BatterySample
 import app.batstats.battery.data.db.BatteryDatabase
-import app.batstats.battery.data.db.BatterySample
 import app.batstats.battery.data.db.ChargeSession
 import app.batstats.battery.data.db.SessionType
 import app.batstats.battery.util.BatteryCapacity
@@ -81,6 +81,12 @@ class BatteryRepository(
     fun recentSamplesFlow(durationMs: Long): Flow<List<BatterySample>> =
         windowStarts(durationMs).flatMapLatest { since ->
             batteryDao.samplesBetween(since, Long.MAX_VALUE)
+        }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun currentChartFlow(durationMs: Long): Flow<List<BatteryCurrentPoint>> =
+        windowStarts(durationMs).flatMapLatest { since ->
+            batteryDao.currentChart(since, Long.MAX_VALUE, (durationMs / 300).coerceAtLeast(1_000L))
         }
 
     /**
@@ -196,17 +202,15 @@ class BatteryRepository(
     private suspend fun completeSession(session: ChargeSession) {
         val end = System.currentTimeMillis()
         val endLevel = _realtime.value.level
-        val samples = batteryDao.samplesBetween(session.startTime, end).first()
-
-        val avgCurrent = samples.mapNotNull { it.currentNowUa }
-            .takeIf { it.isNotEmpty() }
-            ?.average()
-            ?.toLong()
+        val avgCurrent = batteryDao.averageCurrent(session.startTime, end)?.toLong()
 
         // The charge counter moves monotonically within a session, so its endpoints give
         // the charge that actually shifted - steadier than integrating a noisy current.
-        val counters = samples.mapNotNull { it.chargeCounterUah }
-        val deltaUah = if (counters.size >= 2) counters.last() - counters.first() else null
+        val first = batteryDao.firstCounter(session.startTime, end)
+        val last = batteryDao.lastCounter(session.startTime, end)
+        val deltaUah = if (first != null && last != null && first.timestamp < last.timestamp) {
+            last.chargeCounterUah!! - first.chargeCounterUah!!
+        } else null
 
         val estCapacity = BatteryCapacity.fromChargeDelta(deltaUah, endLevel - session.startLevel)
         BatteryCapacity.remember(estCapacity?.toDouble())

@@ -18,11 +18,4 @@ class DrainStatsViewModel(
         drainTracker.resetSession()
     }
     
-    fun startTracking() {
-        drainTracker.start()
-    }
-    
-    fun stopTracking() {
-        drainTracker.stop()
-    }
 }

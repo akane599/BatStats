@@ -109,7 +109,11 @@ object Notifier {
     fun pauseIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
         ctx,
         2002,
-        Intent(ctx, DrainNotificationReceiver::class.java).setAction(DrainNotificationReceiver.ACTION_PAUSE),
+        Intent(ctx, DrainNotificationReceiver::class.java)
+            .setAction(DrainNotificationReceiver.ACTION_PAUSE)
+            // A user tap must not wait behind slow background broadcasts. This receiver
+            // only requests stopService and returns, fitting the shorter foreground budget.
+            .addFlags(Intent.FLAG_RECEIVER_FOREGROUND),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 

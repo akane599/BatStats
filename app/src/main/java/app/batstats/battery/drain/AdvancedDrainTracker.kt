@@ -145,15 +145,7 @@ class AdvancedDrainTracker(
 
     private fun registerReceivers() {
         if (receiverRegistered) return
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_BATTERY_CHANGED)
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(Intent.ACTION_POWER_CONNECTED)
-            addAction(Intent.ACTION_POWER_DISCONNECTED)
-            addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
-        }
-        ContextCompat.registerReceiver(context, stateChangeReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        registerDrainSystemReceiver(context, stateChangeReceiver)
         receiverRegistered = true
     }
 
@@ -276,4 +268,22 @@ class AdvancedDrainTracker(
             }
         }
     }
+}
+
+/**
+ * These six actions are protected broadcasts: Android rejects sends by ordinary apps.
+ * EXPORTED accepts their system delivery, including Android 8's initial sticky replay,
+ * which has sender UID -1 and cannot hold AndroidX's NOT_EXPORTED signature permission.
+ * Keep app-defined actions in separate, non-exported receivers.
+ */
+internal fun registerDrainSystemReceiver(context: Context, receiver: BroadcastReceiver): Intent? {
+    val filter = IntentFilter().apply {
+        addAction(Intent.ACTION_BATTERY_CHANGED)
+        addAction(Intent.ACTION_SCREEN_ON)
+        addAction(Intent.ACTION_SCREEN_OFF)
+        addAction(Intent.ACTION_POWER_CONNECTED)
+        addAction(Intent.ACTION_POWER_DISCONNECTED)
+        addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+    }
+    return ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
 }

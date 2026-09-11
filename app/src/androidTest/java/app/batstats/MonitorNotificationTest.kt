@@ -152,7 +152,10 @@ class MonitorNotificationTest {
         if (notification.channelId != expectedChannel) return false
         val text = notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
         if (text.isBlank() || text == context.getString(R.string.waiting_for_battery)) return false
+        // Android 8 may retain an empty compat extra when no BigTextStyle is attached.
+        // Treat blank and absent as the same presentation state.
         val details = notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
+            ?.toString()?.takeIf { it.isNotBlank() }
         if ((details != null) != (style == 2)) return false
         return if (style == 0) {
             if (drain) text in listOf(context.getString(R.string.screen_on), context.getString(R.string.screen_off))

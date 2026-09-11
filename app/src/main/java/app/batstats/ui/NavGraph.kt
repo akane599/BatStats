@@ -28,7 +28,7 @@ fun NavGraph(
     NavDisplay(
         modifier = modifier,
         backStack = backStack,
-        onBack = { backStack.removeAt(backStack.lastIndex) },
+        onBack = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) },
         entryDecorators = decorators,
         entryProvider = entryProvider {
 
@@ -42,7 +42,7 @@ fun NavGraph(
 
             entry<Screen.History> {
                 HistoryScreen(
-                    onBack = { backStack.removeAt(backStack.lastIndex) },
+                    onBack = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) },
                     onOpenSession = { id -> backStack.add(Screen.SessionDetails(id)) }
                 )
             }
@@ -50,33 +50,34 @@ fun NavGraph(
             entry<Screen.SessionDetails> { args ->
                 SessionDetailsScreen(
                     sessionId = args.sessionId,
-                    onBack = { backStack.removeAt(backStack.lastIndex) },
+                    onBack = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) },
                     vm = koinViewModel(parameters = { parametersOf(args.sessionId) })
                 )
             }
 
             entry<Screen.Data> {
-                DataScreen(onBack = { backStack.removeAt(backStack.lastIndex) })
+                DataScreen(onBack = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) })
             }
 
             entry<Screen.Settings> { args ->
                 BatterySettingsScreen(
-                    onBack = { backStack.removeAt(backStack.lastIndex) },
+                    onBack = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) },
                     onExportData = { backStack.add(Screen.Data) },
+                    onOpenAccess = { backStack.add(Screen.DetailedStats) },
                     initialCategory = args.initialCategory
                 )
             }
 
             entry<Screen.DetailedStats> {
-                DetailedStatsScreen(onBack = { backStack.removeAt(backStack.lastIndex) })
+                DetailedStatsScreen(onBack = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) })
             }
 
             entry<Screen.DrainStats> {
-                DrainStatsScreen(onBack = { backStack.removeAt(backStack.lastIndex) })
+                DrainStatsScreen(onBack = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) })
             }
 
             entry<Screen.AppDrain> {
-                AppDrainScreen(onBack = { backStack.removeAt(backStack.lastIndex) })
+                AppDrainScreen(onBack = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) }, onOpenAccess = { backStack.add(Screen.DetailedStats) })
             }
         }
     )

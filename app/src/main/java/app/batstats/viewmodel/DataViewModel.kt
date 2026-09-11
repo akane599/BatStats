@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import app.batstats.battery.data.ExportImportManager
 import app.batstats.settings.AppSettings
 import io.github.mlmgames.settings.core.SettingsRepository
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,8 +32,9 @@ class DataViewModel(
      * firstLaunchTime, totalSamplesCollected and lastExportTime were all being written and
      * never read. They belong here: you are about to export, so this is what there is.
      */
-    val summary: StateFlow<DataSummary> = settingsRepository.flow
-        .map { DataSummary(it.firstLaunchTime, it.totalSamplesCollected, it.lastExportTime) }
+    val summary: StateFlow<DataSummary> = combine(settingsRepository.flow, exportImportManager.sampleCount) { settings, count ->
+        DataSummary(settings.firstLaunchTime, count, settings.lastExportTime)
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DataSummary())
 
     private val _isBusy = MutableStateFlow(false)
@@ -50,45 +53,47 @@ class DataViewModel(
         to: Long,
         includeSamples: Boolean,
         includeSessions: Boolean
+    ) = runOperation("JSON Exported Successfully", "Export Failed", export = true) {
+        exportImportManager.exportJson(uri, from, to, includeSamples, includeSessions)
+    }
+
+    fun exportCsv(uri: Uri, from: Long, to: Long, includeSamples: Boolean = true, includeSessions: Boolean = true) =
+        runOperation("CSV Exported Successfully", "Export Failed", export = true) {
+            exportImportManager.exportCsvToFolder(uri, from, to, includeSamples, includeSessions)
+        }
+
+    fun importJson(uri: Uri) = runOperation("JSON Imported Successfully", "Import Failed") {
+        exportImportManager.importJson(uri)
+    }
+
+    fun importCsv(uri: Uri) = runOperation("CSV Imported Successfully", "Import Failed") {
+        exportImportManager.importCsv(uri)
+    }
+
+    private fun runOperation(
+        successMessage: String,
+        failureMessage: String,
+        export: Boolean = false,
+        operation: suspend () -> Boolean
     ) {
+        // Set the guard before launching so repeated taps cannot overlap two restores.
+        if (_isBusy.value) return
+        _isBusy.value = true
+        _message.value = null
         viewModelScope.launch {
-            _isBusy.value = true
-            val success = exportImportManager.exportJson(uri, from, to, includeSamples, includeSessions)
-            if (success) markExported()
-            _message.value = if (success) "JSON Exported Successfully" else "Export Failed"
-            _isBusy.value = false
+            try {
+                val success = operation()
+                if (success && export) {
+                    settingsRepository.update { it.copy(lastExportTime = System.currentTimeMillis()) }
+                }
+                _message.value = if (success) successMessage else failureMessage
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _message.value = failureMessage
+            } finally {
+                _isBusy.value = false
+            }
         }
-    }
-
-    fun exportCsv(uri: Uri, from: Long, to: Long) {
-        viewModelScope.launch {
-            _isBusy.value = true
-            val success = exportImportManager.exportCsvToFolder(uri, from, to)
-            if (success) markExported()
-            _message.value = if (success) "CSV Exported Successfully" else "Export Failed"
-            _isBusy.value = false
-        }
-    }
-
-    fun importJson(uri: Uri) {
-        viewModelScope.launch {
-            _isBusy.value = true
-            val success = exportImportManager.importJson(uri)
-            _message.value = if (success) "JSON Imported Successfully" else "Import Failed"
-            _isBusy.value = false
-        }
-    }
-
-    fun importCsv(uri: Uri) {
-        viewModelScope.launch {
-            _isBusy.value = true
-            val success = exportImportManager.importCsv(uri)
-            _message.value = if (success) "CSV Imported Successfully" else "Import Failed"
-            _isBusy.value = false
-        }
-    }
-
-    private suspend fun markExported() {
-        settingsRepository.update { it.copy(lastExportTime = System.currentTimeMillis()) }
     }
 }

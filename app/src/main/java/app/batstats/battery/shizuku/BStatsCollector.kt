@@ -5,6 +5,7 @@ import app.batstats.battery.data.db.AppEnergyDao
 import app.batstats.battery.util.CheckinSource
 import app.batstats.battery.util.PackageNameResolver
 import app.batstats.battery.util.ShellRunner
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,52 +34,51 @@ class BstatsCollector(
 ) {
     companion object {
         private const val TAG = "BstatsCollector"
+        /** Cumulative batterystats deltas do not require a multi-hundred-KB dump every five minutes. */
+        internal const val DEFAULT_POLL_SECONDS = 15 * 60L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val running = AtomicBoolean(false)
     private var job: Job? = null
-    private var last: Map<Int, Double> = emptyMap()
 
     fun isRunning(): Boolean = running.get()
 
-    fun start(pollSec: Long = 300L) {
+    fun start(pollSec: Long = DEFAULT_POLL_SECONDS) {
         if (!running.compareAndSet(false, true)) return
         job = scope.launch {
+            var previous: CheckinParser.Snapshot? = null
+            val intervalMs = pollSec.coerceIn(15L, 86_400L) * 1000L
+            var retryMs = 15_000L
             while (isActive) {
                 try {
                     // Shared with the Detailed Stats screen: whichever asks first pays for
                     // the dump, the other reads the same copy.
-                    val result = checkinSource.get(maxAgeMs = pollSec * 1000L / 2)
+                    val result = checkinSource.get(maxAgeMs = intervalMs / 2)
                     if (result !is ShellRunner.Outcome.Success) {
                         Log.w(TAG, "No privileged access for batterystats --checkin")
-                        delay(5_000)
+                        delay(retryMs)
+                        retryMs = (retryMs * 2).coerceAtMost(intervalMs)
                         continue
                     }
 
                     val snap = CheckinParser.parse(result.output.lineSequence())
                     val now = System.currentTimeMillis()
 
-                    if (last.isNotEmpty()) {
-                        for ((uid, cur) in snap.perUidMah) {
-                            val prev = last[uid] ?: 0.0
-                            val delta = max(0.0, cur - prev)
-                            if (delta > 0.0001) {
-                                dao.incrementHour(
-                                    packageName = nameFor(uid, snap.uidToPackage),
-                                    atMillis = now,
-                                    deltaMah = delta,
-                                    addSamples = 1,
-                                    mode = result.mode.name
-                                )
-                            }
-                        }
+                    val deltas = mutableMapOf<String, Double>()
+                    energyDeltas(previous, snap).forEach { (uid, delta) ->
+                        val pkg = nameFor(uid, snap.uidToPackage)
+                        deltas[pkg] = (deltas[pkg] ?: 0.0) + delta
                     }
-                    last = snap.perUidMah
+                    dao.incrementBatch(deltas, now, result.mode.name)
+                    previous = snap
+                    retryMs = 15_000L
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in polling loop", e)
                 }
-                delay(pollSec * 1000L)
+                delay(intervalMs)
             }
         }
     }
@@ -95,6 +95,5 @@ class BstatsCollector(
         running.set(false)
         job?.cancel()
         job = null
-        last = emptyMap()
     }
 }

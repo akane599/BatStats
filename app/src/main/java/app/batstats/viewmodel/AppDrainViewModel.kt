@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import app.batstats.battery.data.db.AppEnergyDao
 import app.batstats.battery.util.AppInfoResolver
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -63,56 +65,44 @@ class AppDrainViewModel(
     fun toggleSystemApps() = _showSystemApps.update { !it }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val state: StateFlow<AppDrainUiState> = combine(_range, _showSystemApps, ::Pair)
-        .flatMapLatest { (range, showSystem) ->
-            val to = System.currentTimeMillis()
-            val from = to - range.millis
-
+    private val readings = _range.flatMapLatest { range ->
+        flow {
+            while (true) {
+                emit(System.currentTimeMillis())
+                delay(60_000L)
+            }
+        }.flatMapLatest { to ->
+            // Stored energy is bucketed by hour; include the partially overlapping first
+            // bucket and explain that precision in the UI.
+            val from = ((to - range.millis) / 3_600_000L) * 3_600_000L
             dao.modesInRange(from, to).flatMapLatest { modes ->
-                // A privileged dump is a real measurement, so it wins outright over the
-                // heuristic estimate. Adding the two together would be adding a measurement
-                // to a guess about the same hours.
-                val mode = modes.firstOrNull { it != HEURISTIC } ?: modes.firstOrNull()
-                if (mode == null) {
-                    kotlinx.coroutines.flow.flowOf(AppDrainUiState(loading = false))
-                } else {
-                    dao.drainersInRange(from, to, mode).map { aggregates ->
-                        // The share is of everything recorded, including whatever is being
-                        // filtered out of the list - hiding system apps should not inflate
-                        // the percentages of the ones left.
-                        val total = aggregates.sumOf { it.energyMah }
-                        val rows = aggregates
-                            .map { it to appInfo.isSystem(it.packageName) }
-                            .filter { (_, isSystem) -> showSystem || !isSystem }
-                            .map { (aggregate, isSystem) ->
-                                AppDrainRow(
-                                    packageName = aggregate.packageName,
-                                    label = appInfo.label(aggregate.packageName),
-                                    icon = appInfo.icon(aggregate.packageName),
-                                    energyMah = aggregate.energyMah,
-                                    shareOfTotal =
-                                        if (total > 0) (aggregate.energyMah / total).toFloat() else 0f,
-                                    isSystem = isSystem
-                                )
-                            }
-                        AppDrainUiState(
-                            rows = rows,
-                            totalMah = total,
-                            source = if (mode == HEURISTIC) DrainSource.ESTIMATED
-                            else DrainSource.MEASURED,
-                            loading = false
-                        )
-                    }
+                val measured = modes.any { it != HEURISTIC }
+                val mode = if (measured) "MEASURED" else HEURISTIC
+                dao.drainersInRange(from, to, mode).map { aggregates ->
+                    val total = aggregates.sumOf { it.energyMah }
+                    AppDrainUiState(
+                        rows = aggregates.map { aggregate ->
+                            AppDrainRow(
+                                packageName = aggregate.packageName,
+                                label = appInfo.label(aggregate.packageName),
+                                icon = appInfo.icon(aggregate.packageName),
+                                energyMah = aggregate.energyMah,
+                                shareOfTotal = if (total > 0) (aggregate.energyMah / total).toFloat() else 0f,
+                                isSystem = appInfo.isSystem(aggregate.packageName)
+                            )
+                        },
+                        totalMah = total,
+                        source = if (measured) DrainSource.MEASURED else DrainSource.ESTIMATED,
+                        loading = false
+                    )
                 }
             }
         }
-        // Label and icon lookups hit PackageManager, which is too slow for the main thread.
-        .flowOn(Dispatchers.Default)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = AppDrainUiState()
-        )
+    }.flowOn(Dispatchers.Default)
+
+    val state: StateFlow<AppDrainUiState> = combine(readings, _showSystemApps) { state, showSystem ->
+        state.copy(rows = state.rows.filter { showSystem || !it.isSystem })
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppDrainUiState())
 
     private companion object {
         const val HEURISTIC = "HEURISTIC"

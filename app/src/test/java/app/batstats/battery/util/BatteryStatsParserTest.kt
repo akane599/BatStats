@@ -30,8 +30,8 @@ class BatteryStatsParserTest {
     fun `discharge amounts come from the screen-on and screen-off columns`() {
         // dc = low, high, screenOnAmount, screenOffAmount, ...
         val snapshot = BatteryStatsParser.parseCheckin("9,0,l,dc,11,12,21,34,0,0,0,0,0,0")
-        assertEquals(21f, snapshot.screenOnDischargePercent, 0.001f)
-        assertEquals(34f, snapshot.screenOffDischargePercent, 0.001f)
+        assertEquals(21f, snapshot.screenOnDischargePercent!!, 0.001f)
+        assertEquals(34f, snapshot.screenOffDischargePercent!!, 0.001f)
     }
 
     @Test
@@ -50,7 +50,7 @@ class BatteryStatsParserTest {
         assertEquals(5, doze.deepIdleCount)
         assertEquals(900_000L, doze.lightIdleTimeMs)
         assertEquals(9, doze.lightIdleCount)
-        assertEquals(2_400_000L, doze.maintenanceTimeMs)
+        assertEquals(2_400_000L, doze.deviceIdlingTimeMs)
     }
 
     @Test
@@ -457,8 +457,8 @@ class BatteryStatsParserTest {
         val info = BatteryStatsParser.parseDeviceIdle(dump)
         assertEquals("IDLE", info.currentState)
         assertEquals("ACTIVE", info.lightState)
-        assertTrue(info.deepEnabled)
-        assertTrue(!info.lightEnabled)
+        assertEquals(true, info.deepEnabled)
+        assertEquals(false, info.lightEnabled)
         assertTrue(info.whitelistedApps.contains("com.android.providers.downloads"))
         assertTrue(info.whitelistedApps.contains("com.example.app"))
         assertEquals(listOf("UID=10123"), info.tempWhitelistedApps)
@@ -483,11 +483,127 @@ class BatteryStatsParserTest {
         """.trimIndent()
 
         val info = BatteryStatsParser.parsePowerManager(dump)
-        assertTrue(info.isScreenOn)
+        assertEquals(true, info.isScreenOn)
         assertEquals(87, info.batteryLevel)
-        assertEquals("Discharging", info.batteryStatus)
-        assertTrue(info.lowPowerMode)
+        assertNull(info.batteryStatus)
+        assertEquals(false, info.isPowered)
+        assertEquals(true, info.lowPowerMode)
         assertEquals(2, info.holdingWakeLocks.size)
         assertEquals(1, info.suspendBlockers.size)
+    }
+
+
+    @Test
+    fun `missing or invalid summary counters are unavailable rather than zero`() {
+        val missing = BatteryStatsParser.parseCheckin("9,0,l,pws,4500,0,0,0")
+        assertNull(missing.screenOnDischargePercent)
+        assertNull(missing.screenOffDischargePercent)
+        assertNull(missing.screenOnBatteryShare)
+        assertNull(missing.screenOnDrainPerHour)
+        assertNull(missing.screenOffDrainPerHour)
+        assertEquals(false, missing.batteryTimeAvailable)
+        assertEquals(false, missing.screenTimeAvailable)
+
+        val malformed = BatteryStatsParser.parseCheckin("""
+            9,0,l,bt,1,invalid,0
+            9,0,l,m,-5,0
+            9,0,l,dc,0,0,NaN,-1
+        """.trimIndent())
+        assertNull(malformed.screenOnDischargePercent)
+        assertNull(malformed.screenOffDischargePercent)
+        assertNull(malformed.screenOnBatteryShare)
+        assertEquals(false, malformed.batteryTimeAvailable)
+        assertEquals(false, malformed.screenTimeAvailable)
+    }
+
+    @Test
+    fun `all screen-on session has no screen-off drain rate`() {
+        val snapshot = BatteryStatsParser.parseCheckin("""
+            9,0,l,bt,1,3600000,3600000
+            9,0,l,m,3600000,0
+            9,0,l,dc,0,0,5,0
+        """.trimIndent())
+        assertEquals(1f, snapshot.screenOnBatteryShare!!, 0f)
+        assertEquals(5.0, snapshot.screenOnDrainPerHour!!, 0.001)
+        assertNull(snapshot.screenOffDrainPerHour)
+        assertEquals(0f, snapshot.screenOffDischargePercent!!, 0f)
+    }
+
+    @Test
+    fun `recorded zero drain is preserved when its duration exists`() {
+        val snapshot = BatteryStatsParser.parseCheckin("""
+            9,0,l,bt,1,7200000,3600000
+            9,0,l,m,3600000,0
+            9,0,l,dc,0,0,0,0
+        """.trimIndent())
+        assertEquals(0.5f, snapshot.screenOnBatteryShare!!, 0f)
+        assertEquals(0.0, snapshot.screenOnDrainPerHour!!, 0.0)
+        assertEquals(0.0, snapshot.screenOffDrainPerHour!!, 0.0)
+        val empty = BatteryStatsParser.parseCheckin("9,0,l,bt,1,0,0\n9,0,l,m,0,0")
+        assertNull(empty.screenOnBatteryShare)
+        assertNull(empty.screenOnDrainPerHour)
+        assertNull(empty.screenOffDrainPerHour)
+    }
+
+    @Test
+    fun `missing power and idle fields remain unknown`() {
+        val power = BatteryStatsParser.parsePowerManager("Power Manager State:")
+        assertNull(power.isScreenOn)
+        assertNull(power.batteryLevel)
+        assertNull(power.batteryStatus)
+        assertNull(power.isPowered)
+        assertNull(power.lowPowerMode)
+        val idle = BatteryStatsParser.parseDeviceIdle("Settings:")
+        assertNull(idle.deepEnabled)
+        assertNull(idle.lightEnabled)
+    }
+
+    @Test
+    fun `external power does not imply charging`() {
+        val connected = BatteryStatsParser.parsePowerManager("mIsPowered=true")
+        assertEquals(true, connected.isPowered)
+        assertNull(connected.batteryStatus)
+        val paused = BatteryStatsParser.parsePowerManager("mIsPowered=true\nmBatteryStatus=4")
+        assertEquals("Not charging", paused.batteryStatus)
+        val charging = BatteryStatsParser.parsePowerManager("mBatteryStatus=2")
+        assertEquals("Charging", charging.batteryStatus)
+    }
+
+    @Test
+    fun `doze settings sharing a line are parsed independently`() {
+        val idle = BatteryStatsParser.parseDeviceIdle("""
+            mLightEnabled=false  mDeepEnabled=true
+            mState=IDLE mLightState=ACTIVE
+        """.trimIndent())
+        assertEquals(true, idle.deepEnabled)
+        assertEquals(false, idle.lightEnabled)
+        assertEquals("IDLE", idle.currentState)
+        assertEquals("ACTIVE", idle.lightState)
+    }
+
+    @Test
+    fun `explicit display state takes precedence over wakefulness fallback`() {
+        val power = BatteryStatsParser.parsePowerManager("""
+            Display Power: state=OFF
+            mWakefulness=Awake
+        """.trimIndent())
+        assertEquals(false, power.isScreenOn)
+    }
+
+    @Test
+    fun `reported zero doze and broader full idling are preserved`() {
+        val values = MutableList(25) { "0" }
+        values[0] = "9"
+        values[2] = "l"
+        values[3] = "m"
+        val zero = BatteryStatsParser.parseCheckin(values.joinToString(",")).doze
+        assertNotNull(zero)
+        assertEquals(0L, zero!!.deepIdleTimeMs)
+        values[15] = "120000"
+        values[16] = "1"
+        val idling = BatteryStatsParser.parseCheckin(values.joinToString(",")).doze!!
+        assertEquals(0L, idling.deepIdleTimeMs)
+        assertEquals(120000L, idling.deviceIdlingTimeMs)
+        assertEquals(1, idling.deviceIdlingCount)
     }
 }

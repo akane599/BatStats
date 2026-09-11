@@ -44,6 +44,9 @@ android {
             localeFilters += setOf("en", "ar", "de", "es-rES", "es-rUS", "fr", "hr", "hu", "in", "it", "ja", "pl", "pt-rBR", "ru-rRU", "sv", "tr", "uk", "zh")
         }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Let AGP pull UI captures before it uninstalls the test application.
+        testInstrumentationRunnerArguments["additionalTestOutputDir"] =
+            "/sdcard/Android/data/org.mlm.batstats.debug/files/screenshots"
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -146,6 +149,12 @@ apkDist {
     artifactNamePrefix = "batstats"
 }
 
+// apk-dist writes into AGP's APK directory as an assemble finalizer. Connected tests
+// consume that same directory, so Gradle 9 requires their ordering to be explicit.
+tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+    mustRunAfter(tasks.matching { it.name == "distDebugApks" })
+}
+
 // Configure all tasks that are instances of AbstractArchiveTask
 tasks.withType<AbstractArchiveTask>().configureEach {
     isPreserveFileTimestamps = false
@@ -206,7 +215,14 @@ dependencies {
 
     // Testing
     testImplementation(libs.junit)
-//    androidTestImplementation(libs.androidx.ui.test.junit4)
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    androidTestImplementation("androidx.room:room-testing:2.8.4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     debugImplementation(libs.androidx.ui.tooling)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 

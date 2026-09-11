@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name" translatable="false">BatStats</string>
 
     <string name="alarms">Alarms</string>
@@ -268,7 +268,7 @@
 
     <!-- Notification channels -->
     <string name="channel_battery_monitor">Battery Monitor</string>
-    <string name="channel_battery_monitor_quiet">Battery Monitor (hidden)</string>
+    <string name="channel_battery_monitor_quiet">Battery Monitor (quiet)</string>
 
     <!-- Battery alerts -->
     <string name="alert_channel_description">Low battery, temperature and charging alerts</string>
@@ -293,11 +293,109 @@
     <string name="last_24_hours">Last 24 hours</string>
     <string name="no_app_drain_yet">Nothing recorded yet</string>
     <string name="no_app_drain_explanation">Per-app drain is collected while monitoring runs. Give it an hour or two, then check back.</string>
-    <string name="drain_source_measured">Measured from batterystats</string>
-    <string name="drain_source_estimated">Estimated — grant Shizuku, root or ADB for measured figures</string>
+    <string name="drain_source_measured">System battery accounting (batterystats)</string>
+    <string name="drain_source_estimated">Foreground-app estimate</string>
 
     <!-- Home screen widgets -->
     <string name="widget_battery">Battery</string>
     <string name="widget_temperature">Temperature</string>
     <string name="widget_eta">ETA</string>
+    <string name="waiting_for_battery">Waiting for battery data</string>
+    <string name="battery_full">Fully charged</string>
+    <string name="charging_paused">Connected · charging paused</string>
+    <string name="discharging">On battery</string>
+    <string name="power_label">Power</string>
+    <string name="unknown_value">Unknown</string>
+    <string name="health_good">Good</string>
+    <string name="health_overheat">Overheating</string>
+    <string name="health_cold">Cold</string>
+    <string name="health_overvoltage">Overvoltage</string>
+    <string name="health_failure">Check battery</string>
+    <string name="monitoring_active_body">Recording battery readings and charge sessions.</string>
+    <string name="monitoring_paused_body">Start monitoring to record trends, sessions and configured alerts.</string>
+    <string name="pause_monitoring">Pause monitoring</string>
+    <string name="please_wait">Please wait…</string>
+    <string name="action_failed">Action could not be completed</string>
+    <string name="monitoring_action_failed">Monitoring did not change state. Try again while the app is open.</string>
+    <string name="dismiss">Dismiss</string>
+    <string name="close">Close</string>
+    <string name="finish_session">Finish session</string>
+    <string name="finish_session_body">Save this session to history? Battery monitoring will continue.</string>
+    <string name="session_idle_body">Automatic sessions follow charger changes while monitoring. You can also start one manually.</string>
+    <string name="session_auto_body">An automatic session is recording. Plugging or unplugging starts the next one.</string>
+    <string name="session_manual_body">A manual session is recording until you finish it.</string>
+    <string name="range_15m">15 minutes</string>
+    <string name="range_1h">1 hour</string>
+    <string name="range_6h">6 hours</string>
+    <string name="range_24h">24 hours</string>
+    <string name="range_7d">7 days</string>
+    <string name="current_trend">Current · %1$s</string>
+    <string name="chart_live_hint">Average current in mA. Negative values indicate discharge.</string>
+    <string name="chart_paused_hint">Saved readings. Monitoring is paused.</string>
+    <string name="no_chart_data">No current measurements in this time range.</string>
+    <string name="chart_accessibility">%1$d averaged readings, from %2$s to %3$s milliamps</string>
+    <string name="search_apps">Search app or package</string>
+    <string name="clear_search">Clear search</string>
+    <string name="recorded_app_energy">Total recorded app energy</string>
+    <string name="hourly_precision_note">Hourly buckets include the first partial hour. Percentages use all recorded apps, including hidden system apps.</string>
+    <string name="no_matching_apps">No matching apps</string>
+    <string name="no_matching_apps_body">Try another name or include system apps.</string>
+    <string name="clear_filters">Clear filters</string>
+    <string name="check_access">Check access</string>
+    <string name="share_of_recorded_apps">Share of the energy attributed to all recorded apps, not a percentage of the battery capacity.</string>
+    <string name="open_app_settings">Open app settings</string>
+    <string name="app_settings_unavailable">App settings are unavailable for this entry.</string>
+    <string name="reset_stats_title">Reset Android battery statistics?</string>
+    <string name="reset_stats_body">This resets the system battery counters used by Android and other battery apps. Saved BatStats history is kept.</string>
+    <string name="reset_drain_title">Reset this drain session?</string>
+    <string name="reset_drain_body">Current drain totals and the in-memory timeline will be cleared. Saved battery history is kept.</string>
+    <string name="reset_action">Reset</string>
+    <string name="now_label">Now</string>
+    <string name="export_selection_required">Select samples, sessions, or both to export.</string>
+    <string name="no_sessions_match">No sessions match these filters.</string>
+    <string name="search_sessions">Search date, type or session ID</string>
+    <string name="background_access">Access and background operation</string>
+    <string name="background_access_body">Check Shizuku or ADB access, and allow background operation if monitoring stops on your device.</string>
+    <string name="battery_system_settings">Battery optimization settings</string>
+    <string name="usage_access_settings">Usage access settings</string>
+    <string name="settings_more">More settings actions</string>
+    <string name="data_clear_failed">Could not clear history. Pause monitoring and try again.</string>
+    <string name="drain_estimate_note">Screen-on and screen-off energy use charge-counter readings. Sleep and awake show CPU time only. — means unavailable data or less than 2 minutes for a rate. Powered time is excluded.</string>
+    <string name="live_state_unavailable">Start monitoring to collect drain statistics.</string>
+    <string name="search_settings">Search settings</string>
+    <string name="json_size_hint">JSON imports support files up to 32 MB. Use CSV for larger archives. An open imported session must not conflict with an existing session.</string>
+    <string name="notif_current_out">%1$s out</string>
+    <string name="notif_current_in">%1$s in</string>
+    <string name="notif_level" tools:ignore="MissingTranslation">Level %1$s</string>
+    <string name="notif_status" tools:ignore="MissingTranslation">Status: %1$s</string>
+    <string name="notif_temperature_and_power" tools:ignore="MissingTranslation">Temperature %1$s • Power %2$s</string>
+    <string name="notif_drain_compact" tools:ignore="MissingTranslation">On: %1$s • Off: %2$s</string>
+    <string name="notif_drain_rates_heading" tools:ignore="MissingTranslation">━━━ Drain Rates ━━━</string>
+    <string name="notif_screen_off_time_heading" tools:ignore="MissingTranslation">━━━ Screen-Off Time ━━━</string>
+    <string name="notif_session_heading" tools:ignore="MissingTranslation">━━━ Session ━━━</string>
+    <string name="notif_rate_and_duration" tools:ignore="MissingTranslation">%1$s: %2$s (%3$s)</string>
+    <string name="notif_time_and_share" tools:ignore="MissingTranslation">%1$s: %2$s [%3$.0f%%]</string>
+    <string name="notif_session_total" tools:ignore="MissingTranslation">Total: %1$s in %2$s</string>
+    <string name="notif_session_average" tools:ignore="MissingTranslation">Average: %1$s</string>
+    <string name="dozing" tools:ignore="MissingTranslation">Dozing</string>
+    <string name="notif_last_reading">Last reading: %1$s</string>
+    <string name="notif_drain_channel_description">Recorded screen-on and screen-off battery drain</string>
+    <string name="statistics_accounting_note">Android battery accounting since its last reset or charge-cycle reset. Energy and capacity are system estimates; app percentages use full battery capacity.</string>
+    <string name="screen_battery_share_format">%1$.1f%% of recorded battery time</string>
+    <string name="device_full_idling_time">Device full idling</string>
+    <string name="device_full_idling_periods">Full idling periods</string>
+    <string name="device_full_idling_note">Full idling is Android’s broader idle interval, including time outside strict Doze. These are not maintenance-window measurements.</string>
+    <string name="last_observed_state">Last observed system state</string>
+    <string name="external_power_label">External power</string>
+    <string name="external_power_connected">Connected</string>
+    <string name="external_power_disconnected">Disconnected</string>
+    <string name="root_capacity_note">Capacity is reported by the battery gauge. Cycle count alone does not measure battery health.</string>
+    <string name="reported_full_capacity">Reported full</string>
+    <string name="capacity_ratio">Full/design ratio</string>
+    <string name="screen_off_sleep_breakdown">Screen-off sleep breakdown</string>
+    <string name="no_screen_off_recorded">No screen-off time recorded in this session. This section fills after an unplugged screen-off period.</string>
+    <string name="screen_off_sleep_note">Deep sleep and awake describe the CPU during recorded screen-off time. Energy is shown for the whole screen-off period.</string>
+    <string name="screen_off_time_share">%1$.1f%% of screen-off time</string>
+    <string name="screen_off_doze">Screen off · Doze</string>
+    <string name="battery_level_history">Battery level history</string>
 </resources>

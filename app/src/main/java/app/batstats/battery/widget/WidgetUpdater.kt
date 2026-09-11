@@ -17,11 +17,14 @@ object WidgetUpdater {
     const val ACTION_REFRESH = "app.batstats.battery.widget.ACTION_REFRESH"
 
     private const val EM_DASH = "—"
+    private data class RenderedWidget(val ids: List<Int>, val title: String, val value: String)
+    private val rendered = mutableMapOf<Class<*>, RenderedWidget>()
+    private val installedIds = mutableMapOf<Class<*>, List<Int>>()
 
-    fun push(ctx: Context, s: BatterySample, useFahrenheit: Boolean = false) {
-        updateLevel(ctx, s)
-        updateTemp(ctx, s, useFahrenheit)
-        updateTime(ctx, s)
+    fun push(ctx: Context, s: BatterySample, useFahrenheit: Boolean = false, force: Boolean = false) {
+        updateLevel(ctx, s, force)
+        updateTemp(ctx, s, useFahrenheit, force)
+        updateTime(ctx, s, force)
     }
 
     /**
@@ -31,13 +34,41 @@ object WidgetUpdater {
      */
     fun refreshFromSystem(ctx: Context, useFahrenheit: Boolean = false) {
         val sample = BatteryReader.currentSample(ctx)
-        if (sample == null) showPlaceholder(ctx) else push(ctx, sample, useFahrenheit)
+        if (sample == null) showPlaceholder(ctx) else push(ctx, sample, useFahrenheit, force = true)
+    }
+
+    /** A system update for one provider should not redraw the other two providers as well. */
+    fun refreshProviderFromSystem(
+        ctx: Context,
+        provider: Class<*>,
+        useFahrenheit: Boolean = false
+    ) {
+        val sample = BatteryReader.currentSample(ctx)
+        if (sample == null) {
+            setAll(ctx, provider, titleFor(ctx, provider), EM_DASH, force = true)
+            return
+        }
+        when (provider) {
+            BatteryLevelWidget::class.java -> updateLevel(ctx, sample, force = true)
+            BatteryTempWidget::class.java -> updateTemp(ctx, sample, useFahrenheit, force = true)
+            BatteryTimeWidget::class.java -> updateTime(ctx, sample, force = true)
+        }
+    }
+
+    fun noteWidgetIds(provider: Class<*>, ids: IntArray) {
+        synchronized(installedIds) { installedIds[provider] = ids.sorted() }
+        synchronized(rendered) { rendered.remove(provider) }
+    }
+
+    fun invalidateProvider(provider: Class<*>) {
+        synchronized(installedIds) { installedIds.remove(provider) }
+        synchronized(rendered) { rendered.remove(provider) }
     }
 
     fun showPlaceholder(ctx: Context) {
-        setAll(ctx, BatteryLevelWidget::class.java, ctx.getString(R.string.widget_battery), EM_DASH)
-        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), EM_DASH)
-        setAll(ctx, BatteryTimeWidget::class.java, ctx.getString(R.string.widget_eta), EM_DASH)
+        setAll(ctx, BatteryLevelWidget::class.java, ctx.getString(R.string.widget_battery), EM_DASH, force = true)
+        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), EM_DASH, force = true)
+        setAll(ctx, BatteryTimeWidget::class.java, ctx.getString(R.string.widget_eta), EM_DASH, force = true)
     }
 
     private fun createRemoteViews(ctx: Context): RemoteViews {
@@ -55,47 +86,84 @@ object WidgetUpdater {
         return rv
     }
 
-    private fun setAll(ctx: Context, provider: Class<*>, title: String, value: String) {
+    private fun setAll(ctx: Context, provider: Class<*>, title: String, value: String, force: Boolean = false) {
         val mgr = AppWidgetManager.getInstance(ctx)
-        val ids = mgr.getAppWidgetIds(ComponentName(ctx, provider))
-        if (ids.isEmpty()) return
+        val ids = widgetIds(mgr, ctx, provider, refresh = force)
+        val key = RenderedWidget(ids, title, value)
+        synchronized(rendered) {
+            if (ids.isEmpty()) {
+                rendered.remove(provider)
+                return
+            }
+            if (!force && rendered[provider] == key) return
+        }
         val rv = createRemoteViews(ctx).apply {
             setTextViewText(R.id.title, title)
             setTextViewText(R.id.value, value)
         }
         ids.forEach { mgr.updateAppWidget(it, rv) }
+        // Cache only a successful binder update so a transient host failure is retried.
+        synchronized(rendered) { rendered[provider] = key }
     }
 
-    private fun updateLevel(ctx: Context, s: BatterySample) {
+    private fun widgetIds(
+        manager: AppWidgetManager,
+        ctx: Context,
+        provider: Class<*>,
+        refresh: Boolean
+    ): List<Int> {
+        if (!refresh) synchronized(installedIds) {
+            installedIds[provider]?.let { return it }
+        }
+        val ids = manager.getAppWidgetIds(ComponentName(ctx, provider)).sorted()
+        synchronized(installedIds) { installedIds[provider] = ids }
+        return ids
+    }
+
+    private fun titleFor(ctx: Context, provider: Class<*>): String = ctx.getString(when (provider) {
+        BatteryTempWidget::class.java -> R.string.widget_temperature
+        BatteryTimeWidget::class.java -> R.string.widget_eta
+        else -> R.string.widget_battery
+    })
+
+    private fun updateLevel(ctx: Context, s: BatterySample, force: Boolean) {
         setAll(
             ctx,
             BatteryLevelWidget::class.java,
             ctx.getString(R.string.widget_battery),
-            "${s.levelPercent}%"
+            if (s.levelPercent in 0..100) "${s.levelPercent}%" else EM_DASH,
+            force
         )
     }
 
-    private fun updateTemp(ctx: Context, s: BatterySample, useFahrenheit: Boolean) {
-        val tempC = (s.temperatureDeciC ?: 0) / 10.0
+    private fun updateTemp(ctx: Context, s: BatterySample, useFahrenheit: Boolean, force: Boolean) {
+        if (s.temperatureDeciC == null) {
+            setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), EM_DASH, force)
+            return
+        }
+        val tempC = s.temperatureDeciC / 10.0
         val value = if (useFahrenheit) {
             String.format(Locale.getDefault(), "%.1f °F", tempC * 9 / 5 + 32)
         } else {
             String.format(Locale.getDefault(), "%.1f °C", tempC)
         }
-        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), value)
+        setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), value, force)
     }
 
-    private fun updateTime(ctx: Context, s: BatterySample) {
+    private fun updateTime(ctx: Context, s: BatterySample, force: Boolean) {
         setAll(
             ctx,
             BatteryTimeWidget::class.java,
             ctx.getString(R.string.widget_eta),
-            TimeEstimator.etaString(s) ?: EM_DASH
+            TimeEstimator.etaString(s) ?: EM_DASH,
+            force
         )
     }
 
     fun requestRefresh(ctx: Context) {
-        // Fix: use actual package name
-        ctx.sendBroadcast(Intent(ACTION_REFRESH).setPackage(ctx.packageName))
+        // One coordinator reads the gauge once and refreshes every installed widget. A
+        // package-wide implicit broadcast woke all three providers, each of which then
+        // repeated the same read and all three widget updates.
+        ctx.sendBroadcast(Intent(ctx, BatteryLevelWidget::class.java).setAction(ACTION_REFRESH))
     }
 }

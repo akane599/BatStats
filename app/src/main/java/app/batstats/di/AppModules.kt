@@ -111,5 +111,5 @@ val appModule = module {
     viewModel { DrainStatsViewModel(get()) }
     viewModel { AppDrainViewModel(get<BatteryDatabase>().appEnergyDao(), get()) }
 
-    viewModel { (sessionId: String) -> SessionDetailsViewModel(androidApplication(), get(), get(), sessionId) }
+    viewModel { (sessionId: String) -> SessionDetailsViewModel(androidApplication(), get(), get(), sessionId, get()) }
 }

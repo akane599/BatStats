@@ -6,8 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -118,162 +116,87 @@ object RootStatsCollector {
     }
 
     suspend fun getKernelBatteryInfo(): KernelBatteryInfo? = withContext(Dispatchers.IO) {
-        try {
-            val batteryPath = "/sys/class/power_supply/battery"
-            if (!File(batteryPath).exists()) return@withContext null
-
-            fun readFile(name: String): String? = try {
-                File("$batteryPath/$name").readText().trim()
-            } catch (_: Exception) { null }
-
-            val chargeFullDesign = readFile("charge_full_design")?.toLongOrNull()
-            val chargeFull = readFile("charge_full")?.toLongOrNull()
-
-            KernelBatteryInfo(
-                technology = readFile("technology"),
-                cycleCount = readFile("cycle_count")?.toIntOrNull(),
-                chargeFullDesign = chargeFullDesign,
-                chargeFull = chargeFull,
-                chargeNow = readFile("charge_now")?.toLongOrNull(),
-                currentNow = readFile("current_now")?.toLongOrNull(),
-                voltageNow = readFile("voltage_now")?.toIntOrNull(),
-                tempNow = readFile("temp")?.toIntOrNull(),
-                health = readFile("health"),
-                status = readFile("status"),
-                capacityLevel = readFile("capacity_level"),
-                timeToEmptyNow = readFile("time_to_empty_now")?.toLongOrNull(),
-                timeToFullNow = readFile("time_to_full_now")?.toLongOrNull(),
-                batteryAge = if (chargeFullDesign != null && chargeFull != null && chargeFullDesign > 0) {
-                    (chargeFull.toDouble() / chargeFullDesign) * 100
-                } else null
-            )
-        } catch (_: Exception) {
-            null
-        }
+        val path = "/sys/class/power_supply/battery/"
+        val files = readRootFiles(listOf("${path}*"))
+        if (files.isEmpty()) return@withContext null
+        fun read(name: String) = files[path + name]
+        val design = read("charge_full_design")?.toLongOrNull()?.takeIf { it > 0 }
+        val full = read("charge_full")?.toLongOrNull()?.takeIf { it > 0 }
+        KernelBatteryInfo(
+            technology = read("technology"), cycleCount = read("cycle_count")?.toIntOrNull(),
+            chargeFullDesign = design, chargeFull = full,
+            chargeNow = read("charge_now")?.toLongOrNull(),
+            currentNow = read("current_now")?.toLongOrNull(),
+            voltageNow = read("voltage_now")?.toIntOrNull(), tempNow = read("temp")?.toIntOrNull(),
+            health = read("health"), status = read("status"), capacityLevel = read("capacity_level"),
+            timeToEmptyNow = read("time_to_empty_now")?.toLongOrNull(),
+            timeToFullNow = read("time_to_full_now")?.toLongOrNull(),
+            batteryAge = if (design != null && full != null) full.toDouble() / design * 100 else null
+        )
     }
 
     suspend fun getKernelWakelocks(): List<KernelWakelockInfo> = withContext(Dispatchers.IO) {
-        val result = mutableListOf<KernelWakelockInfo>()
-        try {
-            val wakelockPath = when {
-                File("/sys/kernel/wakelock_stats").exists() -> "/sys/kernel/wakelock_stats"
-                File("/proc/wakelocks").exists() -> "/proc/wakelocks"
-                else -> null
-            }
-
-            if (wakelockPath != null) {
-                File(wakelockPath).bufferedReader().useLines { lines ->
-                    lines.drop(1).forEach { line ->
-                        val parts = line.split(Regex("\\s+"))
-                        if (parts.size >= 6) {
-                            result.add(
-                                KernelWakelockInfo(
-                                    name = parts[0].trim('"'),
-                                    count = parts.getOrNull(1)?.toIntOrNull() ?: 0,
-                                    expireCount = parts.getOrNull(2)?.toIntOrNull() ?: 0,
-                                    wakeCount = parts.getOrNull(3)?.toIntOrNull() ?: 0,
-                                    activeCount = parts.getOrNull(4)?.toIntOrNull() ?: 0,
-                                    totalTime = parts.getOrNull(5)?.toLongOrNull() ?: 0L,
-                                    sleepTime = parts.getOrNull(6)?.toLongOrNull() ?: 0L,
-                                    maxTime = parts.getOrNull(7)?.toLongOrNull() ?: 0L,
-                                    lastChange = parts.getOrNull(8)?.toLongOrNull() ?: 0L
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) { }
-        result.sortedByDescending { it.totalTime }
+        val files = readRootFiles(listOf("/sys/kernel/wakelock_stats", "/proc/wakelocks"))
+        val content = files["/sys/kernel/wakelock_stats"] ?: files["/proc/wakelocks"]
+            ?: return@withContext emptyList()
+        content.lineSequence().drop(1).mapNotNull { line ->
+            val parts = line.trim().split(Regex("\\s+"))
+            if (parts.size < 6) return@mapNotNull null
+            KernelWakelockInfo(
+                name = parts[0].trim('"'), count = parts[1].toIntOrNull() ?: 0,
+                expireCount = parts[2].toIntOrNull() ?: 0, wakeCount = parts[3].toIntOrNull() ?: 0,
+                activeCount = parts[4].toIntOrNull() ?: 0, totalTime = parts[5].toLongOrNull() ?: 0,
+                sleepTime = parts.getOrNull(6)?.toLongOrNull() ?: 0,
+                maxTime = parts.getOrNull(7)?.toLongOrNull() ?: 0,
+                lastChange = parts.getOrNull(8)?.toLongOrNull() ?: 0
+            )
+        }.sortedByDescending { it.totalTime }.toList()
     }
 
     suspend fun getCpuInfo(): List<CpuInfo> = withContext(Dispatchers.IO) {
-        val result = mutableListOf<CpuInfo>()
-        try {
-            val cpuDir = File("/sys/devices/system/cpu")
-            val cpuDirs = cpuDir.listFiles { f -> f.name.matches(Regex("cpu\\d+")) }
-                ?.sortedBy { it.name.removePrefix("cpu").toIntOrNull() ?: 0 }
-                ?: return@withContext result
-
-            val clusters = mutableMapOf<Int, MutableList<Int>>()
-            cpuDirs.forEach { cpu ->
-                val cpuNum = cpu.name.removePrefix("cpu").toIntOrNull() ?: return@forEach
-                val policyPath = File("${cpu.absolutePath}/cpufreq/affected_cpus")
-                val cluster = if (policyPath.exists()) {
-                    policyPath.readText().trim().split(" ").firstOrNull()?.toIntOrNull() ?: cpuNum
-                } else cpuNum
-                clusters.getOrPut(cluster) { mutableListOf() }.add(cpuNum)
-            }
-
-            clusters.forEach { (clusterNum, _) ->
-                val cpuPath = "/sys/devices/system/cpu/cpu$clusterNum/cpufreq"
-                if (!File(cpuPath).exists()) return@forEach
-
-                fun read(name: String) = try {
-                    File("$cpuPath/$name").readText().trim()
-                } catch (_: Exception) { null }
-
-                val timeInState = mutableMapOf<Long, Long>()
-                try {
-                    File("$cpuPath/stats/time_in_state").bufferedReader().useLines { lines ->
-                        lines.forEach { line ->
-                            val parts = line.split(" ")
-                            if (parts.size >= 2) {
-                                val freq = parts[0].toLongOrNull() ?: return@forEach
-                                val time = parts[1].toLongOrNull() ?: 0L
-                                timeInState[freq] = time
-                            }
-                        }
-                    }
-                } catch (_: Exception) { }
-
-                result.add(
-                    CpuInfo(
-                        cluster = clusterNum,
-                        currentFreq = read("scaling_cur_freq")?.toLongOrNull() ?: 0L,
-                        minFreq = read("scaling_min_freq")?.toLongOrNull() ?: 0L,
-                        maxFreq = read("scaling_max_freq")?.toLongOrNull() ?: 0L,
-                        governor = read("scaling_governor") ?: "unknown",
-                        timeInState = timeInState
-                    )
-                )
-            }
-        } catch (_: Exception) { }
-        result
+        val root = "/sys/devices/system/cpu/cpu[0-9]*/cpufreq/"
+        val files = readRootFiles(listOf("${root}affected_cpus", "${root}scaling_*", "${root}stats/time_in_state"))
+        val paths = files.keys.map { it.substringBefore("/cpufreq/") + "/cpufreq/" }.distinct()
+        paths.mapNotNull { path ->
+            val cpu = path.substringBefore("/cpufreq/").substringAfterLast("cpu").toIntOrNull()
+                ?: return@mapNotNull null
+            fun read(name: String) = files[path + name]
+            val cluster = read("affected_cpus")?.split(Regex("\\s+"))?.firstOrNull()?.toIntOrNull() ?: cpu
+            val times = read("stats/time_in_state")?.lineSequence()?.mapNotNull {
+                val values = it.trim().split(Regex("\\s+"))
+                val freq = values.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
+                val time = values.getOrNull(1)?.toLongOrNull() ?: return@mapNotNull null
+                freq to time
+            }?.toMap().orEmpty()
+            CpuInfo(cluster, read("scaling_cur_freq")?.toLongOrNull() ?: 0,
+                read("scaling_min_freq")?.toLongOrNull() ?: 0, read("scaling_max_freq")?.toLongOrNull() ?: 0,
+                read("scaling_governor") ?: "unknown", times)
+        }.distinctBy { it.cluster }.sortedBy { it.cluster }
     }
 
     suspend fun getThermalZones(): List<ThermalZone> = withContext(Dispatchers.IO) {
-        val result = mutableListOf<ThermalZone>()
-        try {
-            val thermalDir = File("/sys/class/thermal")
-            val zones = thermalDir.listFiles { f -> f.name.startsWith("thermal_zone") }
-                ?: return@withContext result
-
-            zones.forEach { zone ->
-                fun read(name: String) = try {
-                    File("${zone.absolutePath}/$name").readText().trim()
-                } catch (_: Exception) { null }
-
-                val tripPoints = mutableListOf<TripPoint>()
-                var i = 0
-                while (true) {
-                    val tripType = read("trip_point_${i}_type") ?: break
-                    val tripTemp = read("trip_point_${i}_temp")?.toIntOrNull() ?: break
-                    tripPoints.add(TripPoint(tripType, tripTemp))
-                    i++
+        val root = "/sys/class/thermal/thermal_zone*/"
+        val files = readRootFiles(listOf("${root}type", "${root}temp", "${root}trip_point_*"))
+        val paths = files.keys.map { it.substringBeforeLast('/') + "/" }.distinct()
+        paths.mapNotNull { path ->
+            val temp = files[path + "temp"]?.toIntOrNull() ?: return@mapNotNull null
+            val trips = files.keys.filter { it.startsWith(path + "trip_point_") && it.endsWith("_type") }
+                .sorted().mapNotNull { key ->
+                    val value = files[key.removeSuffix("_type") + "_temp"]?.toIntOrNull()
+                        ?: return@mapNotNull null
+                    TripPoint(files.getValue(key), value)
                 }
+            ThermalZone(path.trimEnd('/').substringAfterLast('/'), files[path + "type"] ?: "unknown", temp, trips)
+        }.sortedBy { it.name }
+    }
 
-                result.add(
-                    ThermalZone(
-                        name = zone.name,
-                        type = read("type") ?: "unknown",
-                        tempMilliC = read("temp")?.toIntOrNull() ?: 0,
-                        tripPoints = tripPoints
-                    )
-                )
-            }
-        } catch (_: Exception) { }
-        result.sortedBy { it.name }
+    /** Paths are fixed internal patterns. Read them in one privileged process per group;
+     * java.io.File would still run under the application's UID after a successful su probe. */
+    private fun readRootFiles(patterns: List<String>): Map<String, String> {
+        val command = "for f in ${patterns.joinToString(" ")}; do " +
+            "if [ -f \"${'$'}f\" ] && [ -r \"${'$'}f\" ]; then " +
+            "printf '__BATSTATS_FILE__%s\\n' \"${'$'}f\"; cat \"${'$'}f\" 2>/dev/null; printf '\\n'; fi; done; exit 0"
+        return parseRootFiles(exec(command, CMD_TIMEOUT_MS).orEmpty())
     }
 
     suspend fun runAsRoot(command: String): String? = withContext(Dispatchers.IO) {
@@ -312,8 +235,9 @@ object RootStatsCollector {
                 start()
             }
 
-            val out = p.inputStream.bufferedReader().use(BufferedReader::readText)
-            if (timedOut.get()) null else out
+            val out = p.inputStream.use { readShellOutput(it, 12 * 1024 * 1024) }
+            val exitCode = p.waitFor()
+            if (timedOut.get() || exitCode != 0) null else out
         } catch (e: Exception) {
             Log.d(TAG, "su failed for '$command': ${e.message}")
             null
@@ -322,4 +246,23 @@ object RootStatsCollector {
             runCatching { process?.destroy() }
         }
     }
+}
+
+/** Delimited sysfs reads can contain multiple lines (CPU time-in-state, wakelock tables). */
+internal fun parseRootFiles(output: String): Map<String, String> {
+    val result = linkedMapOf<String, String>()
+    var path: String? = null
+    val value = StringBuilder()
+    fun flush() {
+        path?.let { key -> value.toString().trim().takeIf(String::isNotEmpty)?.let { result[key] = it } }
+        value.setLength(0)
+    }
+    output.lineSequence().forEach { line ->
+        if (line.startsWith("__BATSTATS_FILE__/")) {
+            flush()
+            path = line.removePrefix("__BATSTATS_FILE__")
+        } else if (path != null) value.appendLine(line)
+    }
+    flush()
+    return result
 }

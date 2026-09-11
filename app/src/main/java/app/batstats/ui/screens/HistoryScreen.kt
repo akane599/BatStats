@@ -32,6 +32,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import app.batstats.util.UiFormat
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,14 +59,14 @@ fun HistoryScreen(
     vm: HistoryViewModel = koinViewModel()
 ) {
     val allSessions by vm.sessions.collectAsStateWithLifecycle(initialValue = emptyList())
-    var filter by remember { mutableStateOf<SessionType?>(null) }
-    var query by remember { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf<SessionType?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
     val sessions = remember(allSessions, filter, query) {
         allSessions
             .filter { s -> filter == null || s.type == filter }
             .filter { s ->
                 if (query.isBlank()) true
-                else s.sessionId.contains(query, ignoreCase = true)
+                else s.sessionId.contains(query, ignoreCase = true) || s.type.name.contains(query, true) || UiFormat.formatDate(s.startTime).contains(query, true)
             }
     }
 
@@ -99,7 +103,8 @@ fun HistoryScreen(
 
             // Content
             if (sessions.isEmpty()) {
-                EmptyHistoryState()
+                if (allSessions.isNotEmpty()) Text(stringResource(R.string.no_sessions_match), Modifier.padding(24.dp))
+                else EmptyHistoryState()
             } else {
                 LazyColumn(
                     contentPadding = PaddingValues(16.dp),
@@ -127,7 +132,7 @@ private fun FilterRow(
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         // Filter chips
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = filter == null,
                 onClick = { onFilter(null) },
@@ -149,7 +154,7 @@ private fun FilterRow(
             value = query,
             onValueChange = onQuery,
             leadingIcon = { Icon(Icons.Outlined.Search, null) },
-            placeholder = { Text(stringResource(R.string.search_session_id)) },
+            placeholder = { Text(stringResource(R.string.search_sessions)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )

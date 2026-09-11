@@ -12,9 +12,12 @@ object BatteryStatsParser {
         val capturedAt: Long = System.currentTimeMillis(),
         val statsSinceCharged: Boolean = true,
         val batteryRealtimeMs: Long = 0L,
+        val batteryUptimeMs: Long = 0L,
         val screenOnTimeMs: Long = 0L,
-        val screenOffDischargePercent: Float = 0f,
-        val screenOnDischargePercent: Float = 0f,
+        val screenOffDischargePercent: Float? = null,
+        val screenOnDischargePercent: Float? = null,
+        val batteryTimeAvailable: Boolean = false,
+        val screenTimeAvailable: Boolean = false,
         val estimatedCapacityMah: Int = 0,
         val apps: List<AppPowerStats> = emptyList(),
         val wakelocks: List<WakelockStats> = emptyList(),
@@ -36,7 +39,23 @@ object BatteryStatsParser {
          * back to "uid:NNNNN" - see the ADB note in DetailedStatsScreen.
          */
         val mappedPackages: Int = 0
-    )
+    ) {
+        /** Unobserved/missing periods must not look like measured zero drain. */
+        val screenOnBatteryShare: Float?
+            get() = if (batteryTimeAvailable && screenTimeAvailable &&
+                batteryRealtimeMs > 0L && screenOnTimeMs in 0..batteryRealtimeMs
+            ) screenOnTimeMs.toFloat() / batteryRealtimeMs else null
+
+        val screenOnDrainPerHour: Double?
+            get() = if (screenTimeAvailable && screenOnTimeMs > 0L)
+                screenOnDischargePercent?.let { it / (screenOnTimeMs / 3_600_000.0) }
+            else null
+
+        val screenOffDrainPerHour: Double?
+            get() = if (screenOnBatteryShare != null && batteryRealtimeMs > screenOnTimeMs)
+                screenOffDischargePercent?.let { it / ((batteryRealtimeMs - screenOnTimeMs) / 3_600_000.0) }
+            else null
+    }
 
     data class AppPowerStats(
         val uid: Int,
@@ -204,8 +223,9 @@ object BatteryStatsParser {
         val deepIdleCount: Int,
         val lightIdleTimeMs: Long,
         val lightIdleCount: Int,
-        val maintenanceTimeMs: Long,
-        val maintenanceCount: Int
+        /** Android's broader full-idling interval; this is not maintenance-window time. */
+        val deviceIdlingTimeMs: Long,
+        val deviceIdlingCount: Int
     )
 
     data class CpuFrequencyStats(
@@ -245,9 +265,12 @@ object BatteryStatsParser {
         val uidTimes = mutableMapOf<Int, UidTimes>()
 
         var batteryRealtimeMs = 0L
+        var batteryUptimeMs = 0L
         var screenOnTimeMs = 0L
-        var screenOffDischarge = 0f
-        var screenOnDischarge = 0f
+        var screenOffDischarge: Float? = null
+        var screenOnDischarge: Float? = null
+        var batteryTimeAvailable = false
+        var screenTimeAvailable = false
         var estCapacity = 0
 
         lines.forEach { line ->
@@ -356,25 +379,32 @@ object BatteryStatsParser {
                     // Battery discharge:
                     // 9,0,l,dc,<low>,<high>,<screenOnAmount>,<screenOffAmount>,...
                     parts.getOrNull(2) == "l" && parts.getOrNull(3) == "dc" -> {
-                        parts.getOrNull(6)?.toFloatOrNull()?.let { screenOnDischarge = it }
-                        parts.getOrNull(7)?.toFloatOrNull()?.let { screenOffDischarge = it }
+                        screenOnDischarge = parts.getOrNull(6)?.toFloatOrNull()?.takeIf { it.isFinite() && it >= 0f }
+                        screenOffDischarge = parts.getOrNull(7)?.toFloatOrNull()?.takeIf { it.isFinite() && it >= 0f }
                     }
 
                     // Battery core: 9,0,l,bt,startCount,battRealtime,battUptime,...
                     parts[2] == "l" && parts[3] == "bt" -> {
-                        batteryRealtimeMs = parts.getOrNull(5)?.toLongOrNull() ?: 0L
+                        val time = parts.getOrNull(5)?.toLongOrNull()?.takeIf { it >= 0L }
+                        batteryTimeAvailable = time != null
+                        batteryRealtimeMs = time ?: 0L
+                        batteryUptimeMs = parts.getOrNull(6)?.toLongOrNull() ?: 0L
                     }
 
                     // Misc: 9,0,l,m,screenOnTime,phoneOnTime,... (also carries Doze totals)
                     parts[2] == "l" && parts[3] == "m" -> {
-                        screenOnTimeMs = parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                        val time = parts.getOrNull(4)?.toLongOrNull()?.takeIf { it >= 0L }
+                        screenTimeAvailable = time != null
+                        screenOnTimeMs = time ?: 0L
                         doze = parseDoze(parts) ?: doze
                     }
 
                     // Power summary: 9,0,l,pws,capacity,computed,minDrained,maxDrained
                     parts[2] == "l" && parts[3] == "pws" -> {
                         // Capacity is formatted as mAh and may carry decimals.
-                        estCapacity = parts.getOrNull(4)?.toDoubleOrNull()?.roundToLong()?.toInt() ?: 0
+                        estCapacity = parts.getOrNull(4)?.toDoubleOrNull()
+                            ?.takeIf { it.isFinite() && it in 1.0..Int.MAX_VALUE.toDouble() }
+                            ?.roundToLong()?.toInt() ?: 0
                     }
 
                     // Process stats: 9,<uid>,l,pr,<process>,<user>,<sys>,<fg>,<starts>
@@ -431,7 +461,10 @@ object BatteryStatsParser {
         return FullSnapshot(
             capturedAt = System.currentTimeMillis(),
             batteryRealtimeMs = batteryRealtimeMs,
+            batteryUptimeMs = batteryUptimeMs,
             screenOnTimeMs = screenOnTimeMs,
+            batteryTimeAvailable = batteryTimeAvailable,
+            screenTimeAvailable = screenTimeAvailable,
             screenOffDischargePercent = screenOffDischarge,
             screenOnDischargePercent = screenOnDischarge,
             estimatedCapacityMah = estCapacity,
@@ -587,7 +620,7 @@ object BatteryStatsParser {
     ) {
         val uid = parts[1].toIntOrNull() ?: return
         val type = parts.getOrNull(4) ?: return
-        val mah = parts.getOrNull(5)?.toDoubleOrNull() ?: 0.0
+        val mah = parts.getOrNull(5)?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: return
 
         // 9,<uid>,l,pwi,<label>,<mAh>,<shouldHide>,<screenMah>,<smearMah>
         // Only rows labelled "uid" are per-app; the rest are device-wide component totals
@@ -598,7 +631,7 @@ object BatteryStatsParser {
             // figures sums to the total. Column 8 does not - on a real device it came back
             // larger than the app's own total - so it is left alone until it can be
             // explained rather than surfaced as a number nobody can act on.
-            val screen = parts.getOrNull(7)?.toDoubleOrNull() ?: 0.0
+            val screen = parts.getOrNull(7)?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
             val existing = appStats[uid] ?: AppPowerStats(uid = uid, packageName = pkg, powerMah = 0.0)
             appStats[uid] = existing.copy(
                 powerMah = existing.powerMah + mah,
@@ -843,7 +876,7 @@ object BatteryStatsParser {
      * ```
      *  13 deviceIdleModeFullTime      (deep Doze)   17 mobileRadioActiveCount
      *  14 deviceIdleModeFullCount                   18 mobileRadioActiveUnknownTime
-     *  15 deviceIdlingTime            (maintenance) 19 deviceLightIdleModeTime
+     *  15 deviceIdlingTime            (broader full idling) 19 deviceLightIdleModeTime
      *  16 deviceIdlingCount                         20 deviceLightIdleModeCount
      * ```
      */
@@ -852,12 +885,10 @@ object BatteryStatsParser {
 
         val deepTime = parts.getOrNull(13)?.toLongOrNull() ?: return null
         val deepCount = parts.getOrNull(14)?.toIntOrNull() ?: 0
-        val maintTime = parts.getOrNull(15)?.toLongOrNull() ?: 0L
-        val maintCount = parts.getOrNull(16)?.toIntOrNull() ?: 0
+        val idlingTime = parts.getOrNull(15)?.toLongOrNull() ?: 0L
+        val idlingCount = parts.getOrNull(16)?.toIntOrNull() ?: 0
         val lightTime = parts.getOrNull(19)?.toLongOrNull() ?: 0L
         val lightCount = parts.getOrNull(20)?.toIntOrNull() ?: 0
-
-        if (deepTime == 0L && lightTime == 0L && deepCount == 0 && lightCount == 0) return null
 
         return DozeStats(
             idleModeTimeMs = deepTime + lightTime,
@@ -866,8 +897,8 @@ object BatteryStatsParser {
             deepIdleCount = deepCount,
             lightIdleTimeMs = lightTime,
             lightIdleCount = lightCount,
-            maintenanceTimeMs = maintTime,
-            maintenanceCount = maintCount
+            deviceIdlingTimeMs = idlingTime,
+            deviceIdlingCount = idlingCount
         )
     }
 
@@ -1063,11 +1094,14 @@ object BatteryStatsParser {
         return total
     }
 
+    private fun dumpField(raw: String, name: String): String? =
+        Regex("(?:^|\\s)${Regex.escape(name)}=([^\\s]+)").find(raw)?.groupValues?.get(1)
+
     data class DeviceIdleInfo(
         val currentState: String,
         val lightState: String,
-        val deepEnabled: Boolean,
-        val lightEnabled: Boolean,
+        val deepEnabled: Boolean?,
+        val lightEnabled: Boolean?,
         val screenOnTime: Long,
         val screenOffTime: Long,
         val whitelistedApps: List<String>,
@@ -1075,10 +1109,6 @@ object BatteryStatsParser {
     )
 
     fun parseDeviceIdle(raw: String): DeviceIdleInfo {
-        var currentState = "UNKNOWN"
-        var lightState = "UNKNOWN"
-        var deepEnabled = true
-        var lightEnabled = true
         var screenOnTime = 0L
         var screenOffTime = 0L
         val whitelisted = mutableListOf<String>()
@@ -1090,10 +1120,6 @@ object BatteryStatsParser {
         raw.lineSequence().forEach { line ->
             val trimmed = line.trim()
             when {
-                trimmed.startsWith("mState=") -> currentState = trimmed.removePrefix("mState=")
-                trimmed.startsWith("mLightState=") -> lightState = trimmed.removePrefix("mLightState=")
-                trimmed.startsWith("mDeepEnabled=") -> deepEnabled = trimmed.contains("true")
-                trimmed.startsWith("mLightEnabled=") -> lightEnabled = trimmed.contains("true")
                 trimmed.startsWith("mScreenOnTime=") -> screenOnTime = trimmed.removePrefix("mScreenOnTime=").toLongOrNull() ?: 0L
                 trimmed.startsWith("mScreenOffTime=") -> screenOffTime = trimmed.removePrefix("mScreenOffTime=").toLongOrNull() ?: 0L
                 // Real dumps use several headings: "Whitelist system apps:",
@@ -1121,10 +1147,10 @@ object BatteryStatsParser {
         }
 
         return DeviceIdleInfo(
-            currentState = currentState,
-            lightState = lightState,
-            deepEnabled = deepEnabled,
-            lightEnabled = lightEnabled,
+            currentState = dumpField(raw, "mState") ?: "UNKNOWN",
+            lightState = dumpField(raw, "mLightState") ?: "UNKNOWN",
+            deepEnabled = dumpField(raw, "mDeepEnabled")?.toBooleanStrictOrNull(),
+            lightEnabled = dumpField(raw, "mLightEnabled")?.toBooleanStrictOrNull(),
             screenOnTime = screenOnTime,
             screenOffTime = screenOffTime,
             whitelistedApps = whitelisted,
@@ -1133,22 +1159,25 @@ object BatteryStatsParser {
     }
 
     data class PowerManagerInfo(
-        val screenBrightness: Int,
-        val isScreenOn: Boolean,
+        val screenBrightness: Int?,
+        val isScreenOn: Boolean?,
         val holdingWakeLocks: List<String>,
         val suspendBlockers: List<String>,
-        val batteryLevel: Int,
-        val batteryStatus: String,
-        val lowPowerMode: Boolean,
+        val batteryLevel: Int?,
+        val batteryStatus: String?,
+        val isPowered: Boolean?,
+        val lowPowerMode: Boolean?,
         val deviceIdleMode: String
     )
 
     fun parsePowerManager(raw: String): PowerManagerInfo {
-        var brightness = 0
-        var screenOn = false
-        var batteryLevel = 0
-        var batteryStatus = "UNKNOWN"
-        var lowPowerMode = false
+        var brightness: Int? = null
+        var screenOn: Boolean? = null
+        var displayScreenOn: Boolean? = null
+        var batteryLevel: Int? = null
+        var batteryStatus: String? = null
+        var isPowered: Boolean? = null
+        var lowPowerMode: Boolean? = null
         var deviceIdleMode = "UNKNOWN"
         val wakeLocks = mutableListOf<String>()
         val suspendBlockers = mutableListOf<String>()
@@ -1160,30 +1189,44 @@ object BatteryStatsParser {
             val trimmed = line.trim()
             when {
                 trimmed.startsWith("mScreenBrightnessSetting=") -> {
-                    brightness = trimmed.substringAfter("=").toIntOrNull() ?: 0
+                    brightness = trimmed.substringAfter("=").toIntOrNull()?.takeIf { it >= 0 }
                 }
                 trimmed.startsWith("Display Power: state=") -> {
-                    screenOn = trimmed.substringAfter("=").startsWith("ON")
+                    displayScreenOn = when (trimmed.substringAfter("=").substringBefore(" ")) {
+                        "ON", "VR" -> true
+                        "OFF", "DOZE", "DOZE_SUSPEND" -> false
+                        else -> null
+                    }
                 }
                 // Fallback for dumps that do not include the Display Power line.
                 trimmed.startsWith("mWakefulness=") -> {
-                    screenOn = trimmed.substringAfter("=").equals("Awake", ignoreCase = true)
+                    screenOn = when (trimmed.substringAfter("=").lowercase()) {
+                        "awake", "dreaming" -> true
+                        "asleep", "dozing" -> false
+                        else -> null
+                    }
                 }
                 trimmed.startsWith("mBatteryLevel=") -> {
-                    batteryLevel = trimmed.substringAfter("=").toIntOrNull() ?: 0
+                    batteryLevel = trimmed.substringAfter("=").toIntOrNull()?.takeIf { it in 0..100 }
                 }
                 trimmed.startsWith("mBatteryStatus=") -> {
-                    batteryStatus = trimmed.substringAfter("=")
+                    batteryStatus = when (val status = trimmed.substringAfter("=").trim()) {
+                        "2" -> "Charging"
+                        "3" -> "Discharging"
+                        "4" -> "Not charging"
+                        "5" -> "Full"
+                        "", "1", "UNKNOWN" -> null
+                        else -> status
+                    }
                 }
                 // dumpsys power reports the plug state rather than a status string.
                 trimmed.startsWith("mIsPowered=") -> {
-                    if (batteryStatus == "UNKNOWN") {
-                        batteryStatus = if (trimmed.contains("true")) "Charging" else "Discharging"
-                    }
+                    // Plug state does not establish that charge is flowing into the cell.
+                    isPowered = trimmed.substringAfter("=").toBooleanStrictOrNull()
                 }
                 trimmed.startsWith("mLowPowerModeEnabled=") ||
                     trimmed.startsWith("mBatterySaverEnabled=") -> {
-                    lowPowerMode = trimmed.contains("true")
+                    lowPowerMode = trimmed.substringAfter("=").toBooleanStrictOrNull()
                 }
                 trimmed.startsWith("mDeviceIdleMode=") -> {
                     deviceIdleMode = trimmed.substringAfter("=")
@@ -1208,11 +1251,12 @@ object BatteryStatsParser {
 
         return PowerManagerInfo(
             screenBrightness = brightness,
-            isScreenOn = screenOn,
+            isScreenOn = displayScreenOn ?: screenOn,
             holdingWakeLocks = wakeLocks,
             suspendBlockers = suspendBlockers,
             batteryLevel = batteryLevel,
             batteryStatus = batteryStatus,
+            isPowered = isPowered,
             lowPowerMode = lowPowerMode,
             deviceIdleMode = deviceIdleMode
         )

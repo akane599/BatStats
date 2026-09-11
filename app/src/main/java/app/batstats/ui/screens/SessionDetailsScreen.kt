@@ -1,164 +1,103 @@
 package app.batstats.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.batstats.R
+import app.batstats.battery.data.db.SessionType
 import app.batstats.viewmodel.SessionDetailsViewModel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.*
-import kotlin.math.abs
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionDetailsScreen(
-    sessionId: String,
-    onBack: () -> Unit,
-    vm: SessionDetailsViewModel
-) {
-    val ui by vm.ui.collectAsState()
-
+fun SessionDetailsScreen(sessionId: String, onBack: () -> Unit, vm: SessionDetailsViewModel) {
+    val ui by vm.ui.collectAsStateWithLifecycle()
+    val fahrenheit by vm.fahrenheit.collectAsStateWithLifecycle()
+    val formatter = remember(Locale.getDefault()) { DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale.getDefault()) }
+    fun date(at: Long) = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault()).format(formatter)
     Scaffold(topBar = {
-        LargeTopAppBar(
-            title = { Text(stringResource(R.string.session_details)) },
-            navigationIcon = { TextButton(onClick = onBack) { Text(stringResource(R.string.back)) } },
-            actions = {
-//                IconButton(onClick = { /* share later */ }) { Icon(Icons.Outlined.Share, null) }
-//                IconButton(onClick = { /* export later */ }) { Icon(Icons.Outlined.Download, null) }
-            }
-        )
-    }) { pv ->
-        Column(
-            Modifier.padding(pv).fillMaxSize().padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            val dateTimeFormatter = remember(Locale.getDefault()) {
-                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
-            }
-            val startStr = remember(ui.start) {
-                Instant.ofEpochMilli(ui.start)
-                    .atZone(ZoneId.systemDefault())
-                    .format(dateTimeFormatter)
-            }
-            val endStr = remember(ui.end) {
-                ui.end?.let {
-                    Instant.ofEpochMilli(it)
-                        .atZone(ZoneId.systemDefault())
-                        .format(dateTimeFormatter)
-                } ?: "Active"
-            }
-
-            ElevatedCard {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        stringResource(R.string.session_summary, ui.type, ui.levelRange),
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(stringResource(R.string.start_time, startStr), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(stringResource(R.string.end_time, endStr), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        ui.capacityMah?.let {
-                            AssistChip(onClick = {}, label = { Text(stringResource(R.string.milliamp_hours_approx, it)) })
-                        }
-                        ui.avgCurrent?.let {
-                            AssistChip(onClick = {}, label = { Text(stringResource(R.string.milliamp_average, (it / 1000).toInt())) })
+        TopAppBar(title = { Text(stringResource(R.string.session_details)) }, navigationIcon = {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) }
+        })
+    }) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (ui.loading) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            } else if (ui.type == null) {
+                Text(stringResource(R.string.no_data_available))
+            } else {
+                Card {
+                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val type = stringResource(if (ui.type == SessionType.CHARGE) R.string.charging else R.string.discharging)
+                        Text("$type · ${ui.levelRange}", style = MaterialTheme.typography.titleLarge)
+                        Text(stringResource(R.string.start_time, date(ui.start)))
+                        Text(stringResource(R.string.end_time, ui.end?.let(::date) ?: stringResource(R.string.now_label)))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            ui.capacityMah?.let { Text(stringResource(R.string.milliamp_hours_approx, it)) }
+                            ui.avgCurrent?.let { Text(stringResource(R.string.milliamp_average, (it / 1000).toInt())) }
                         }
                     }
                 }
-            }
-
-            val primaryColor = MaterialTheme.colorScheme.primary
-            val tertiaryColor = MaterialTheme.colorScheme.tertiary
-            val errorColor = MaterialTheme.colorScheme.error
-
-            ChartCard("Current (mA)") {
-                val values = ui.points.map { it.currentMa?.toFloat() ?: 0f }
-                drawSeries(values, primaryColor)
-            }
-            ChartCard("Voltage (mV)") {
-                val values = ui.points.map { it.voltageMv?.toFloat() ?: 0f }
-                drawSeries(values, tertiaryColor)
-            }
-            ChartCard("Temperature (°C)") {
-                val values = ui.points.map { it.tempC?.toFloat() ?: 0f }
-                drawSeries(values, errorColor)
-            }
-
-            AnimatedVisibility(visible = ui.points.isEmpty(), enter = fadeIn(), exit = fadeOut()) {
-                Text(
-                    "No data points captured yet.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(4.dp)
-                )
+                val times = ui.points.map { it.timestamp }
+                SessionChart("${stringResource(R.string.current)} (mA)", times, ui.points.map { it.currentMa }, MaterialTheme.colorScheme.primary)
+                SessionChart("${stringResource(R.string.voltage)} (mV)", times, ui.points.map { it.voltageMv }, MaterialTheme.colorScheme.tertiary)
+                SessionChart("${stringResource(R.string.temperature)} (${if (fahrenheit) "°F" else "°C"})", times,
+                    ui.points.map { it.tempC?.let { c -> if (fahrenheit) c * 9 / 5 + 32 else c } }, MaterialTheme.colorScheme.secondary)
             }
         }
     }
 }
 
 @Composable
-private fun ChartCard(
-    title: String,
-    drawBlock: DrawScope.() -> Unit
-) {
-    ElevatedCard {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+private fun SessionChart(title: String, times: List<Long>, values: List<Double?>, color: Color) {
+    val known = values.filterNotNull().filter(Double::isFinite)
+    Card {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            val scroll = rememberScrollState()
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(180.dp)
-                    .horizontalScroll(scroll)
-            ) {
-                Canvas(modifier = Modifier.width(1100.dp).height(180.dp)) {
-                    drawBlock()
+            if (known.isEmpty()) {
+                Text(stringResource(R.string.no_data_available), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                val min = known.min()
+                val max = known.max()
+                val label = String.format(Locale.getDefault(), "%.1f – %.1f", min, max)
+                Text(label, style = MaterialTheme.typography.labelMedium)
+                Canvas(Modifier.fillMaxWidth().height(150.dp).semantics { contentDescription = "$title: $label" }) {
+                    val span = (times.last() - times.first()).coerceAtLeast(1).toDouble()
+                    val range = max - min
+                    var previous: Offset? = null
+                    values.forEachIndexed { index, value ->
+                        if (value == null || !value.isFinite()) { previous = null; return@forEachIndexed }
+                        val x = if (times.size == 1) size.width / 2 else ((times[index] - times.first()) / span * size.width).toFloat()
+                        val y = if (range > 0.000001) (size.height * (1 - (value - min) / range)).toFloat() else size.height / 2
+                        val point = Offset(x, y.coerceIn(3.dp.toPx(), size.height - 3.dp.toPx()))
+                        previous?.let { drawLine(color, it, point, strokeWidth = 2.dp.toPx()) }
+                            ?: drawCircle(color, 2.dp.toPx(), point)
+                        previous = point
+                    }
+                }
+                val format = remember(Locale.getDefault()) { DateTimeFormatter.ofPattern("d MMM HH:mm", Locale.getDefault()) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    listOf(times.first(), times.last()).forEach {
+                        Text(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).format(format), style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }
-    }
-}
-
-private fun DrawScope.drawSeries(values: List<Float>, color: Color) {
-    if (values.isEmpty()) return
-    val count = values.size
-    val min = values.minOrNull() ?: 0f
-    val max = values.maxOrNull() ?: 1f
-    val hasRange = abs(max - min) > 1e-6f
-    val range = if (hasRange) (max - min) else 1f
-    val stepX = if (count > 1) size.width / (count - 1) else 0f
-
-    fun mapY(v: Float) = if (hasRange) {
-        size.height - ((v - min) / range) * size.height
-    } else size.height * 0.5f
-
-    var prev: Offset? = null
-    values.forEachIndexed { i, v ->
-        val x = if (count > 1) i * stepX else size.width * 0.5f
-        val p = Offset(x, mapY(v))
-        prev?.let {
-            drawLine(color = color, start = it, end = p, strokeWidth = 3f)
-        } ?: if (count == 1) {
-            drawCircle(color = color, radius = 4.dp.toPx(), center = p)
-        } else {
-
-        }
-        prev = p
     }
 }

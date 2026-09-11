@@ -4,6 +4,7 @@ import android.os.Binder
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Shizuku UserService binder that executes shell commands with the shell (ADB) identity.
@@ -39,7 +40,7 @@ class ShellUserService : Binder() {
                 val cmd = data.readString().orEmpty()
                 val out = runCommand(cmd, DEFAULT_TIMEOUT_MS)
                 reply?.writeString(
-                    if (out.length > MAX_INLINE_OUTPUT_CHARS) out.take(MAX_INLINE_OUTPUT_CHARS) else out
+                    if (out.length > MAX_INLINE_OUTPUT_CHARS) "ERROR:Inline output limit exceeded" else out
                 )
                 true
             }
@@ -78,6 +79,7 @@ class ShellUserService : Binder() {
             val sink = ParcelFileDescriptor.AutoCloseOutputStream(pfd)
             var process: Process? = null
             var watchdog: Thread? = null
+            val timedOut = AtomicBoolean(false)
             try {
                 val p = ProcessBuilder("sh", "-c", cmd)
                     .redirectErrorStream(true)
@@ -87,7 +89,10 @@ class ShellUserService : Binder() {
 
                 watchdog = Thread {
                     try {
-                        if (!p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) p.destroyForcibly()
+                        if (!p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                            timedOut.set(true)
+                            p.destroyForcibly()
+                        }
                     } catch (_: InterruptedException) {
                         // Command finished first; nothing to do.
                     }
@@ -103,10 +108,17 @@ class ShellUserService : Binder() {
                     if (read < 0) break
                     sink.write(buffer, 0, read)
                 }
+                val exitCode = p.waitFor()
+                val error = when {
+                    timedOut.get() -> "Command timed out after $timeoutMs ms"
+                    exitCode != 0 -> "Command exited with status $exitCode"
+                    else -> null
+                }
+                if (error != null) sink.write("\nERROR:$error\n".toByteArray())
                 sink.flush()
             } catch (t: Throwable) {
                 runCatching {
-                    sink.write("ERROR:${t.message ?: t.javaClass.simpleName}".toByteArray())
+                    sink.write("\nERROR:${t.message ?: t.javaClass.simpleName}\n".toByteArray())
                 }
             } finally {
                 watchdog?.interrupt()
@@ -121,18 +133,36 @@ class ShellUserService : Binder() {
 
     private fun runCommand(cmd: String, timeoutMs: Long): String {
         var process: Process? = null
+        var watchdog: Thread? = null
+        val timedOut = AtomicBoolean(false)
         return try {
             val p = ProcessBuilder("sh", "-c", cmd)
                 .redirectErrorStream(true)
                 .start()
             process = p
             runCatching { p.outputStream.close() }
+            // Start the timeout before reading: readText() itself can block indefinitely.
+            watchdog = Thread {
+                try {
+                    if (!p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                        timedOut.set(true)
+                        p.destroyForcibly()
+                    }
+                } catch (_: InterruptedException) {
+                    // Finished first.
+                }
+            }.apply { isDaemon = true; start() }
             val out = p.inputStream.bufferedReader().use { it.readText() }
-            if (!p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) p.destroyForcibly()
-            out
+            val exitCode = p.waitFor()
+            when {
+                timedOut.get() -> "ERROR:Command timed out after $timeoutMs ms"
+                exitCode != 0 -> "ERROR:Command exited with status $exitCode"
+                else -> out
+            }
         } catch (t: Throwable) {
             "ERROR:${t.message ?: t.javaClass.simpleName}"
         } finally {
+            watchdog?.interrupt()
             runCatching { process?.destroy() }
         }
     }

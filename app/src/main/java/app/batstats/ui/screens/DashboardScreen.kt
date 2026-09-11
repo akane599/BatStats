@@ -1,115 +1,50 @@
 package app.batstats.ui.screens
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
+import android.os.BatteryManager
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ShowChart
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Battery0Bar
-import androidx.compose.material.icons.filled.BatteryChargingFull
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.OfflineBolt
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.outlined.Analytics
-import androidx.compose.material.icons.outlined.Battery0Bar
-import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.ElectricBolt
-import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SettingsPower
-import androidx.compose.material.icons.outlined.Thermostat
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.ProgressBarRangeInfo
-import androidx.compose.ui.semantics.progressBarRangeInfo
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.batstats.R
 import app.batstats.battery.data.BatteryRepository
+import app.batstats.battery.data.db.BatteryCurrentPoint
 import app.batstats.battery.data.db.ChargeSession
 import app.batstats.battery.data.db.SessionType
 import app.batstats.battery.drain.formatLevelRatePerHour
 import app.batstats.battery.util.TimeEstimator
+import app.batstats.settings.useFahrenheit
+import app.batstats.ui.components.StatusMessage
 import app.batstats.viewmodel.DashboardViewModel
+import org.koin.androidx.compose.koinViewModel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import org.koin.androidx.compose.koinViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     onOpenHistory: () -> Unit,
@@ -118,44 +53,22 @@ fun DashboardScreen(
 ) {
     val rt by vm.realtime.collectAsStateWithLifecycle()
     val session by vm.activeSession.collectAsStateWithLifecycle()
-    val isMonitoring by vm.isMonitoring.collectAsStateWithLifecycle()
-    val showCurrentInMa by vm.showCurrentInMa.collectAsStateWithLifecycle()
+    val monitoring by vm.isMonitoring.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val error by vm.error.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val points by vm.recentSamples.collectAsStateWithLifecycle(initialValue = emptyList())
+    var confirmEnd by rememberSaveable { mutableStateOf(false) }
 
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-
-    val currentLocale = LocalConfiguration.current.locales[0]
-    val timeFormatter = remember(currentLocale) {
-        DateTimeFormatter.ofPattern("HH:mm:ss", currentLocale)
+    LifecycleResumeEffect(Unit) {
+        vm.refreshReading()
+        onPauseOrDispose { }
     }
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            LargeTopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            stringResource(R.string.batstats),
-                            style = MaterialTheme.typography.headlineMedium
-                        )
-                        AnimatedVisibility(visible = rt.sample != null) {
-                            val ts = rt.sample?.timestamp ?: System.currentTimeMillis()
-                            val formatted = remember(ts) {
-                                Instant.ofEpochMilli(ts)
-                                    .atZone(ZoneId.systemDefault())
-                                    .format(timeFormatter)
-                            }
-                            Text(
-                                stringResource(R.string.updated, formatted),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                // Everything else moved to the navigation bar. Material asks for at most
-                // three actions here; there were six, and on a narrow phone they left the
-                // title barely any room.
+            TopAppBar(
+                title = { Text(stringResource(R.string.nav_battery), fontWeight = FontWeight.Bold) },
                 actions = {
                     IconButton(onClick = onOpenHistory) {
                         Icon(Icons.Outlined.History, stringResource(R.string.history))
@@ -163,615 +76,220 @@ fun DashboardScreen(
                     IconButton(onClick = onOpenAlarms) {
                         Icon(Icons.Outlined.Notifications, stringResource(R.string.alarms))
                     }
-                },
-                scrollBehavior = scrollBehavior
+                }
             )
-        },
-        containerColor = MaterialTheme.colorScheme.surface
-    ) { pv ->
+        }
+    ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = pv,
-            verticalArrangement = Arrangement.spacedBy(0.dp)
+            modifier = Modifier.fillMaxSize().padding(padding).testTag("dashboard_list"),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item { HeroBatteryCard(rt, session, showCurrentInMa) }
-            item {
-                ControlCenter(
-                    session = session,
-                    isMonitoring = isMonitoring,
-                    onToggleMonitor = { vm.toggleMonitoring() },
-                    onStartSession = { vm.startManualSession(it) },
-                    onEndSession = { vm.endSession() }
-                )
+            item(key = "battery") { BatteryOverviewCard(rt, settings.showCurrentInMa) }
+            item(key = "monitor") {
+                MonitoringCard(monitoring, busy, vm::toggleMonitoring)
             }
-            item { StatsGrid(rt) }
-            item { LiveChartCard(vm) }
-            item { Spacer(Modifier.height(16.dp)) }
+            error?.let { message ->
+                item(key = "error") {
+                    StatusMessage(stringResource(R.string.action_failed), stringResource(message),
+                        action = stringResource(R.string.dismiss), onAction = vm::clearError, error = true)
+                }
+            }
+            item(key = "metrics") { BatteryMetrics(rt, settings.useFahrenheit) }
+            item(key = "session") {
+                SessionControls(session, monitoring && !busy, vm::startManualSession, { confirmEnd = true }, onOpenHistory)
+            }
+            item(key = "chart") {
+                val range = stringResource(when (settings.chartTimeRangeIndex) {
+                    0 -> R.string.range_15m
+                    2 -> R.string.range_6h
+                    3 -> R.string.range_24h
+                    4 -> R.string.range_7d
+                    else -> R.string.range_1h
+                })
+                CurrentTrendCard(points, range, monitoring)
+            }
         }
     }
-}
-
-@Composable
-private fun HeroBatteryCard(
-    rt: BatteryRepository.Realtime,
-    session: ChargeSession?,
-    showCurrentInMa: Boolean
-) {
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-        ),
-        shape = RoundedCornerShape(24.dp)
-    ) {
-        val infinite = rememberInfiniteTransition(label = "hero_gradient")
-        val animatedOffset by infinite.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(animation = tween(10_000, easing = LinearEasing)),
-            label = "gradient_offset"
+    if (confirmEnd) {
+        AlertDialog(
+            onDismissRequest = { confirmEnd = false },
+            title = { Text(stringResource(R.string.finish_session)) },
+            text = { Text(stringResource(R.string.finish_session_body)) },
+            confirmButton = { TextButton(onClick = { confirmEnd = false; vm.endSession() }) { Text(stringResource(R.string.end)) } },
+            dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text(stringResource(R.string.cancel)) } }
         )
-
-        val primary = MaterialTheme.colorScheme.primary
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(300.dp)
-                .drawWithCache {
-                    onDrawBehind {
-                        drawRect(
-                            brush = Brush.radialGradient(
-                                colors = listOf(primary.copy(alpha = 0.1f), Color.Transparent),
-                                center = Offset(
-                                    size.width * (0.3f + animatedOffset * 0.4f),
-                                    size.height * 0.5f
-                                ),
-                                radius = size.width * 0.8f
-                            )
-                        )
-                    }
-                }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                CircularBatteryIndicator(
-                    level = rt.level,
-                    isCharging = rt.plugged != 0,
-                    current = rt.currentMa,
-                    currentLabel = currentLabel(rt, showCurrentInMa),
-                    modifier = Modifier.size(180.dp)
-                )
-
-                Spacer(Modifier.height(14.dp))
-
-                val eta = TimeEstimator.etaString(rt.sample)
-                AnimatedContent(
-                    targetState = eta,
-                    transitionSpec = {
-                        fadeIn() + slideInVertically() togetherWith fadeOut() + slideOutVertically()
-                    },
-                    label = "eta"
-                ) { value ->
-                    if (value != null) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-                        ) {
-                            Text(
-                                text = value,
-                                modifier = Modifier
-                                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                                    .widthIn(max = 260.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
 @Composable
-private fun CircularBatteryIndicator(
-    level: Int,
-    isCharging: Boolean,
-    current: Int,
-    currentLabel: String,
-    modifier: Modifier = Modifier
-) {
-    val progress by animateFloatAsState(
-        targetValue = level / 100f,
-        animationSpec = tween(1000, easing = FastOutSlowInEasing),
-        label = "battery_progress"
-    )
+internal fun BatteryOverviewCard(rt: BatteryRepository.Realtime, showCurrentInMa: Boolean) {
     val colors = MaterialTheme.colorScheme
-
-    Box(
-        modifier = modifier.semantics {
-            progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f, 0)
-            stateDescription = if (isCharging) "Charging $level%" else "Discharging $level%"
-        },
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokeWidth = 16.dp.toPx()
-            val radius = (size.minDimension - strokeWidth) / 2
-            val center = size.center
-
-            drawCircle(
-                color = colors.surfaceVariant,
-                radius = radius,
-                center = center,
-                style = Stroke(strokeWidth, cap = StrokeCap.Round)
-            )
-
-            val sweepAngle = progress * 360f
-            val arcColors = when {
-                isCharging -> listOf(colors.primary, colors.tertiary)
-                level < 20 -> listOf(colors.error, colors.errorContainer)
-                else -> listOf(colors.primary, colors.primaryContainer)
-            }
-            drawArc(
-                brush = Brush.sweepGradient(arcColors, center = center),
-                startAngle = -90f,
-                sweepAngle = sweepAngle,
-                useCenter = false,
-                style = Stroke(strokeWidth, cap = StrokeCap.Round),
-                size = Size(radius * 2, radius * 2),
-                topLeft = Offset(center.x - radius, center.y - radius)
-            )
-        }
-
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "$level",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold
-            )
-            val statusText = when {
-                isCharging && level >= 100 -> "Full"
-                isCharging -> "Charging"
-                else -> "Discharging"
-            }
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            AnimatedVisibility(visible = current != 0) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 4.dp)
-                ) {
-                    Icon(
-                        imageVector = if (current > 0) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (current > 0) colors.primary else colors.error
-                    )
-                    Text(
-                        text = currentLabel,
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
-            }
-        }
-
-        if (isCharging) {
-            val infinite = rememberInfiniteTransition(label = "charging_pulse")
-            val animatedAlpha by infinite.animateFloat(
-                initialValue = 0.3f,
-                targetValue = 0.7f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1000),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "charging_alpha"
-            )
-
-            Icon(
-                imageVector = Icons.Default.OfflineBolt,
-                contentDescription = stringResource(R.string.charging),
-                modifier = Modifier
-                    .size(32.dp)
-                    .align(Alignment.TopEnd)
-                    .alpha(animatedAlpha),
-                tint = colors.primary
-            )
-        }
+    val known = rt.sample != null
+    val status = stringResource(when {
+        !known -> R.string.waiting_for_battery
+        rt.sample?.status == BatteryManager.BATTERY_STATUS_FULL -> R.string.battery_full
+        rt.sample?.status == BatteryManager.BATTERY_STATUS_CHARGING -> R.string.charging
+        rt.plugged != 0 -> R.string.charging_paused
+        else -> R.string.discharging
+    })
+    val current = if (rt.sample?.currentNowUa == null) "—" else {
+        val rate = rt.sample?.let { formatLevelRatePerHour(rt.currentMa, TimeEstimator.capacityMahFor(it)) }
+        if (showCurrentInMa) "${rt.currentMa} mA" else rate ?: "${rt.currentMa} mA"
     }
-}
-
-@Composable
-private fun ControlCenter(
-    session: ChargeSession?,
-    isMonitoring: Boolean,
-    onToggleMonitor: () -> Unit,
-    onStartSession: (SessionType) -> Unit,
-    onEndSession: () -> Unit,
-) {
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+    val progress by animateFloatAsState(if (known) rt.level.coerceIn(0, 100) / 100f else 0f, label = "battery_level")
+    Card(colors = CardDefaults.cardColors(containerColor = colors.primaryContainer), shape = RoundedCornerShape(28.dp)) {
+        Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (known) "${rt.level}%" else "—", style = MaterialTheme.typography.displayLarge,
+                        fontWeight = FontWeight.Bold, modifier = Modifier.testTag("battery_level"))
+                    Text(status, style = MaterialTheme.typography.titleMedium)
+                }
+                Icon(if (rt.plugged != 0) Icons.Outlined.BatteryChargingFull else Icons.Outlined.BatteryFull,
+                    null, Modifier.size(48.dp))
+            }
+            LinearProgressIndicator(
+                progress = { progress }, modifier = Modifier.fillMaxWidth().height(8.dp),
+                color = if (known && rt.level < 20 && rt.plugged == 0) colors.error else colors.primary,
+                trackColor = colors.onPrimaryContainer.copy(alpha = .12f)
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column {
-                    Text(stringResource(R.string.monitoring), style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        stringResource(
-                            if (isMonitoring) R.string.monitoring_running
-                            else R.string.monitoring_stopped
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isMonitoring) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(stringResource(R.string.current), style = MaterialTheme.typography.labelMedium)
+                    Text(current, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 }
-
-                val busy = remember { mutableStateOf(false) }
-                FilledTonalButton(
-                    enabled = !busy.value,
-                    onClick = { onToggleMonitor() },
-                    colors = if (isMonitoring)
-                        ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
-                    else
-                        ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                ) {
-                    Icon(
-                        if (isMonitoring) Icons.Default.Stop else Icons.Default.PlayArrow,
-                        null,
-                        Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(if (isMonitoring) R.string.stop else R.string.start))
+                TimeEstimator.etaString(rt.sample)?.let { eta ->
+                    Text(eta, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.align(Alignment.CenterVertically))
                 }
             }
-
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 12.dp),
-                color = MaterialTheme.colorScheme.outlineVariant
-            )
-
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        stringResource(R.string.session_tracking),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (session == null) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AssistChip(
-                                onClick = { onStartSession(SessionType.CHARGE) },
-                                label = { Text(stringResource(R.string.charge)) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.BatteryChargingFull, null, Modifier.size(16.dp))
-                                }
-                            )
-                            AssistChip(
-                                onClick = { onStartSession(SessionType.DISCHARGE) },
-                                label = { Text(stringResource(R.string.discharge)) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Battery0Bar, null, Modifier.size(16.dp))
-                                }
-                            )
-                        }
-                    } else {
-                        TextButton(onClick = onEndSession) {
-                            Icon(Icons.Default.CheckCircle, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.end))
-                        }
-                    }
-                }
-
-                if (session != null) {
-                    val shortLocale = LocalConfiguration.current.locales[0]
-                    val shortTime = remember(shortLocale) {
-                        DateTimeFormatter.ofPattern("HH:mm", shortLocale)
-                    }
-                    val startedAt = remember(session.startTime) {
-                        Instant.ofEpochMilli(session.startTime)
-                            .atZone(ZoneId.systemDefault())
-                            .format(shortTime)
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = buildString {
-                            append(
-                                stringResource(
-                                    R.string.session_active,
-                                    session.type.toString(),
-                                    startedAt
-                                )
-                            )
-                            // Sessions now open and close with the charger, so say which
-                            // ones appeared on their own rather than leaving it a mystery.
-                            if (session.autoStarted) {
-                                append(" • ")
-                                append(stringResource(R.string.session_tracked_automatically))
-                            }
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            rt.sample?.let { sample ->
+                val locale = LocalConfiguration.current.locales[0]
+                val formatter = remember(locale) { DateTimeFormatter.ofPattern("HH:mm:ss", locale) }
+                val time = Instant.ofEpochMilli(sample.timestamp).atZone(ZoneId.systemDefault()).format(formatter)
+                Text(stringResource(R.string.updated, time), style = MaterialTheme.typography.labelSmall)
             }
         }
     }
 }
 
 @Composable
-private fun StatsGrid(rt: BatteryRepository.Realtime) {
-    val locale = remember { Locale.getDefault() }
-    val stats = listOf(
-        Triple(Icons.Outlined.ElectricBolt, "Voltage", "${rt.voltageMv} mV"),
-        Triple(Icons.Outlined.SettingsPower, "Power", String.format(locale, "%.1f mW", rt.powerMw)),
-        Triple(Icons.Outlined.Thermostat, "Temperature", String.format(locale, "%.1f°C", rt.temperatureC)),
-        Triple(Icons.Outlined.Battery0Bar, "Health", getHealthString(rt.sample?.health))
-    )
+private fun MonitoringCard(running: Boolean, busy: Boolean, onToggle: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.monitoring), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(if (running) R.string.monitoring_active_body else R.string.monitoring_paused_body),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = onToggle, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("monitor_toggle")) {
+                Icon(if (running) Icons.Default.Pause else Icons.Default.PlayArrow, null, Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(if (busy) R.string.please_wait else if (running) R.string.pause_monitoring else R.string.start_monitoring))
+            }
+        }
+    }
+}
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        stats.chunked(2).forEach { chunk ->
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                chunk.forEach { (icon, label, value) ->
-                    StatCard(
-                        icon = icon,
-                        label = label,
-                        value = value,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+@Composable
+private fun BatteryMetrics(rt: BatteryRepository.Realtime, fahrenheit: Boolean) {
+    val sample = rt.sample
+    val locale = LocalConfiguration.current.locales[0]
+    val temp = sample?.temperatureDeciC?.let { value ->
+        val c = value / 10.0
+        String.format(locale, if (fahrenheit) "%.1f °F" else "%.1f °C", if (fahrenheit) c * 9 / 5 + 32 else c)
+    } ?: "—"
+    val health = stringResource(when (sample?.health) {
+        BatteryManager.BATTERY_HEALTH_GOOD -> R.string.health_good
+        BatteryManager.BATTERY_HEALTH_OVERHEAT -> R.string.health_overheat
+        BatteryManager.BATTERY_HEALTH_COLD -> R.string.health_cold
+        BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> R.string.health_overvoltage
+        BatteryManager.BATTERY_HEALTH_DEAD, BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> R.string.health_failure
+        else -> R.string.unknown_value
+    })
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MetricTile(stringResource(R.string.temperature), temp, Icons.Outlined.Thermostat, Modifier.weight(1f))
+            MetricTile(stringResource(R.string.voltage), sample?.voltageMv?.let { "$it mV" } ?: "—", Icons.Outlined.ElectricBolt, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val power = if (sample?.currentNowUa != null && sample.voltageMv != null) String.format(locale, "%.0f mW", rt.powerMw) else "—"
+            MetricTile(stringResource(R.string.power_label), power, Icons.Outlined.Speed, Modifier.weight(1f))
+            MetricTile(stringResource(R.string.health), health, Icons.Outlined.FavoriteBorder, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun MetricTile(label: String, value: String, icon: ImageVector, modifier: Modifier) {
+    Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun SessionControls(session: ChargeSession?, enabled: Boolean, onStart: (SessionType) -> Unit, onEnd: () -> Unit, onHistory: () -> Unit) {
+    OutlinedCard {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(stringResource(R.string.session_tracking), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(if (session == null) R.string.session_idle_body else if (session.autoStarted) R.string.session_auto_body else R.string.session_manual_body),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (session == null) {
+                    OutlinedButton(onClick = { onStart(SessionType.CHARGE) }, enabled = enabled) { Text(stringResource(R.string.charge)) }
+                    OutlinedButton(onClick = { onStart(SessionType.DISCHARGE) }, enabled = enabled) { Text(stringResource(R.string.discharge)) }
+                } else {
+                    FilledTonalButton(onClick = onEnd, enabled = enabled) { Text(stringResource(R.string.finish_session)) }
                 }
+                TextButton(onClick = onHistory) { Text(stringResource(R.string.history)) }
             }
         }
     }
 }
 
 @Composable
-private fun StatCard(
-    icon: ImageVector,
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
-    ElevatedCard(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    modifier = Modifier
-                        .padding(8.dp)
-                        .fillMaxSize(),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            Column {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LiveChartCard(vm: DashboardViewModel) {
-    val samples by vm.recentSamples.collectAsState(initial = emptyList())
-    val live by vm.liveCurrent.collectAsState(initial = emptyList())
-
-    val chartValues: List<Float> =
-        if (samples.isNotEmpty()) samples.map { (it.currentNowUa ?: 0L).toFloat() / 1000f }
-        else live
-
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        shape = RoundedCornerShape(20.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Current (last 15 minutes)",
-                    style = MaterialTheme.typography.titleMedium
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "Live",
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            AnimatedLineChart(
-                values = chartValues,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(160.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun AnimatedLineChart(
-    values: List<Float>,
-    modifier: Modifier = Modifier
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val primaryContainer = MaterialTheme.colorScheme.primaryContainer
-
-    Canvas(
-        modifier = modifier.drawWithCache {
+private fun CurrentTrendCard(points: List<BatteryCurrentPoint>, range: String, running: Boolean) {
+    val values = remember(points) { points.filter { it.currentMa?.isFinite() == true } }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.current_trend, range), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(if (running) R.string.chart_live_hint else R.string.chart_paused_hint),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (values.isEmpty()) {
-                onDrawBehind { }
+                Text(stringResource(R.string.no_chart_data), Modifier.padding(vertical = 24.dp))
             } else {
-                val count = values.size
-                val min = values.minOrNull() ?: 0f
-                val max = values.maxOrNull() ?: 1f
-                val hasRange = kotlin.math.abs(max - min) > 1e-6f
-                val range = if (hasRange) (max - min) else 1f
-                val stepX = if (count > 1) size.width / (count - 1) else 0f
-
-                fun mapY(v: Float): Float =
-                    if (hasRange) size.height - ((v - min) / range) * size.height
-                    else size.height * 0.5f
-
-                val fillPath = Path().apply {
-                    values.forEachIndexed { i, v ->
-                        val x = if (count > 1) i * stepX else size.width * 0.5f
-                        val y = mapY(v)
-                        if (i == 0) moveTo(x, y) else lineTo(x, y)
+                val min = values.minOf { it.currentMa!! }.toFloat()
+                val max = values.maxOf { it.currentMa!! }.toFloat()
+                val locale = LocalConfiguration.current.locales[0]
+                val description = stringResource(R.string.chart_accessibility, values.size,
+                    String.format(locale, "%.0f", min), String.format(locale, "%.0f", max))
+                Text(String.format(locale, "%.0f … %.0f mA", min, max), style = MaterialTheme.typography.labelMedium)
+                val color = MaterialTheme.colorScheme.primary
+                val grid = MaterialTheme.colorScheme.outlineVariant
+                Canvas(Modifier.fillMaxWidth().height(140.dp).semantics { contentDescription = description }) {
+                    val span = (values.last().timestamp - values.first().timestamp).coerceAtLeast(1L)
+                    val yRange = (max - min).takeIf { it > .01f } ?: 1f
+                    val inset = 4.dp.toPx()
+                    fun point(i: Int): Offset {
+                        val x = if (values.size == 1) size.width / 2 else (values[i].timestamp - values.first().timestamp).toFloat() / span * size.width
+                        val y = if (max == min) size.height / 2 else inset + (1 - (values[i].currentMa!!.toFloat() - min) / yRange) * (size.height - 2 * inset)
+                        return Offset(x, y)
                     }
-                    lineTo(size.width, size.height)
-                    lineTo(0f, size.height)
-                    close()
-                }
-
-                val strokeGradient = Brush.horizontalGradient(listOf(primary, primaryContainer))
-                val fillGradient = Brush.verticalGradient(
-                    colors = listOf(primaryContainer.copy(alpha = 0.35f), Color.Transparent)
-                )
-
-                onDrawBehind {
-                    if (count >= 2) drawPath(fillPath, brush = fillGradient)
-
-                    var prev: Offset? = null
-                    values.forEachIndexed { i, v ->
-                        val x = if (count > 1) i * stepX else size.width * 0.5f
-                        val p = Offset(x, mapY(v))
-
-                        prev?.let { pr ->
-                            drawLine(
-                                brush = strokeGradient,
-                                start = pr,
-                                end = p,
-                                strokeWidth = 3.dp.toPx(),
-                                cap = StrokeCap.Round
-                            )
-                        } ?: if (count == 1) {
-                            drawCircle(color = primary, radius = 4.dp.toPx(), center = p)
-                            drawCircle(color = primary.copy(alpha = 0.3f), radius = 8.dp.toPx(), center = p)
-                        } else {
-
-                        }
-
-                        if (i == values.lastIndex && count > 1) {
-                            drawCircle(color = primary, radius = 4.dp.toPx(), center = p)
-                            drawCircle(color = primary.copy(alpha = 0.3f), radius = 8.dp.toPx(), center = p)
-                        }
-                        prev = p
+                    repeat(3) { index ->
+                        val y = inset + (size.height - 2 * inset) * index / 2
+                        drawLine(grid, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
                     }
+                    val path = Path()
+                    values.indices.forEach { i ->
+                        val p = point(i)
+                        if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
+                    }
+                    drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+                    drawCircle(color, 4.dp.toPx(), point(values.lastIndex))
                 }
             }
         }
-    ) { }
-}
-
-private fun getHealthString(health: Int?): String = when(health) {
-    2 -> "Good"
-    3 -> "Overheat"
-    4 -> "Dead"
-    5 -> "Over voltage"
-    6 -> "Failed"
-    7 -> "Cold"
-    else -> "Unknown"
-}
-/**
- * The reading under the battery ring. "Show Current in mA" chooses between the raw draw and
- * the share of the battery per hour; without a capacity to measure against there is no share
- * to show, so the mA stands either way.
- */
-@Composable
-private fun currentLabel(rt: BatteryRepository.Realtime, showCurrentInMa: Boolean): String {
-    val milliAmps = "${kotlin.math.abs(rt.currentMa)} mA"
-    if (showCurrentInMa) return milliAmps
-    val capacity = rt.sample?.let { TimeEstimator.capacityMahFor(it) }
-    return formatLevelRatePerHour(rt.currentMa, capacity) ?: milliAmps
+    }
 }

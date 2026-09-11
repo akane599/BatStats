@@ -7,5 +7,7 @@ import kotlinx.coroutines.flow.map
 class HistoryViewModel(
     repo: BatteryRepository
 ) : ViewModel() {
-    val sessions = repo.sessionDao.sessionsPaged(100, 0).map { it }
+    // Session metadata is small; keep the entire history searchable rather than silently
+    // hiding everything older than the first 100 sessions. Samples remain queried separately.
+    val sessions = repo.sessionDao.allSessions()
 }

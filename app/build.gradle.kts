@@ -44,6 +44,9 @@ android {
             localeFilters += setOf("en", "ar", "de", "es-rES", "es-rUS", "fr", "hr", "hu", "in", "it", "ja", "pl", "pt-rBR", "ru-rRU", "sv", "tr", "uk", "zh")
         }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Let AGP pull UI captures before it uninstalls the test application.
+        testInstrumentationRunnerArguments["additionalTestOutputDir"] =
+            "/sdcard/Android/data/org.mlm.batstats.debug/files/screenshots"
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -217,6 +220,7 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:rules:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.room:room-testing:2.8.4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     debugImplementation(libs.androidx.ui.tooling)

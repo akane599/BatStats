@@ -64,6 +64,7 @@ jobs:
           path: |
             app/build/reports/
             app/build/outputs/androidTest-results/
+            app/build/outputs/connected_android_test_additional_output/
             screenshots/
             device-logcat.txt
           if-no-files-found: warn

@@ -205,7 +205,7 @@ private fun DetailedStatsContent(
             }
 
             if (!hasAdvanced) {
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                Box(Modifier.weight(1f)) {
                 PrivilegeRequiredCard(
                     hasShizuku = hasShizuku,
                     hasAdb = hasAdb,

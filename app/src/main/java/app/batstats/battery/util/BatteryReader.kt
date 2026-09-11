@@ -27,16 +27,22 @@ object BatteryReader {
         val batteryManager = context.getSystemService(BatteryManager::class.java)
         val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        val status = intent.getIntExtra(
+            BatteryManager.EXTRA_STATUS,
+            BatteryManager.BATTERY_STATUS_UNKNOWN
+        )
+        val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
 
         return BatterySample(
             timestamp = System.currentTimeMillis(),
             levelPercent = batteryLevel(level, scale) ?: -1,
-            status = intent.getIntExtra(
-                BatteryManager.EXTRA_STATUS,
-                BatteryManager.BATTERY_STATUS_UNKNOWN
+            status = status,
+            plugged = plugged,
+            currentNowUa = normalizeBatteryCurrent(
+                batteryManager?.let { currentNowUa(it) },
+                plugged,
+                status
             ),
-            plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0),
-            currentNowUa = batteryManager?.let { currentNowUa(it) },
             chargeCounterUah = batteryManager
                 ?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
                 ?.let(::batteryProperty)?.takeIf { it >= 0 },

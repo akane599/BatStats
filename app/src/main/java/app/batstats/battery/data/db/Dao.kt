@@ -101,9 +101,36 @@ interface AlarmDao {
  */
 @Dao
 interface AppEnergyDao {
+    /** One Room transaction for all pending heuristic/measurement increments. */
+    @Transaction
+    suspend fun incrementEntries(entries: List<AppEnergyIncrement>) {
+        entries.forEach { entry ->
+            val changed = updateIncrement(
+                entry.bucketStart,
+                entry.packageName,
+                entry.mode,
+                entry.energyMah,
+                entry.samples
+            )
+            if (changed == 0) {
+                insert(
+                    AppEnergyStat(
+                        bucketStart = entry.bucketStart,
+                        packageName = entry.packageName,
+                        mode = entry.mode,
+                        energyMah = entry.energyMah,
+                        samples = entry.samples
+                    )
+                )
+            }
+        }
+    }
+
     @Transaction
     suspend fun incrementBatch(deltas: Map<String, Double>, atMillis: Long, mode: String) {
-        deltas.forEach { (pkg, delta) -> incrementHour(pkg, atMillis, delta, 1, mode) }
+        incrementEntries(deltas.map { (pkg, delta) ->
+            AppEnergyIncrement(hourBucketStart(atMillis), pkg, mode, delta, 1)
+        })
     }
 
     @Transaction
@@ -163,10 +190,19 @@ interface AppEnergyDao {
     suspend fun purgeOlderThan(olderThan: Long)
 }
 
-private fun hourBucketStart(ms: Long): Long {
+internal fun hourBucketStart(ms: Long): Long {
     val hourMs = 60 * 60 * 1000L
     return (ms / hourMs) * hourMs
 }
+
+/** A pre-aggregated update, allowing high-rate samples to share one database transaction. */
+data class AppEnergyIncrement(
+    val bucketStart: Long,
+    val packageName: String,
+    val mode: String,
+    val energyMah: Double,
+    val samples: Int
+)
 
 /** One averaged chart bucket, keeping long-range charts bounded in memory. */
 data class BatteryCurrentPoint(val timestamp: Long, val currentMa: Double?)

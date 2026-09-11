@@ -7,8 +7,11 @@ import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.os.Build
 import android.os.Process
+import android.os.SystemClock
 import app.batstats.battery.data.BatteryRepository
 import app.batstats.battery.data.db.AppEnergyDao
+import app.batstats.battery.data.db.AppEnergyIncrement
+import app.batstats.battery.data.db.hourBucketStart
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
@@ -35,38 +38,63 @@ class ForegroundDrainTracker(
         job = scope.launch {
             var lastTs = System.currentTimeMillis()
             var lastPkg: String? = null
+            val writeBuffer = HeuristicWriteBuffer()
 
-            batteryRepo.realtimeFlow.collect { rt ->
-                val now = rt.sample?.timestamp ?: System.currentTimeMillis()
-                // Cap the interval: if the flow stalls - doze, a killed process - we have no
-                // reason to believe one app held the foreground for the whole gap, and
-                // uncapped this would attribute hours of drain to it on a single reading.
-                val dtHours = ((now - lastTs).coerceIn(0L, MAX_ATTRIBUTED_GAP_MS)) / 3_600_000.0
-
-                // Only discharge is attributable. The current is positive on the charger, so
-                // taking its magnitude used to credit a fast charge to whatever app happened
-                // to be open - 1500 mA of charging read as 1420 mA of "excess app drain".
-                val screenOn = rt.sample?.screenOn == true
-                val discharging = rt.plugged == 0 && rt.currentMa < 0
-                // UsageStats is a binder/database query. There is no attribution work to do
-                // while charging or screen-off, so avoid paying for that query on those samples.
-                val pkg = if (shouldQueryForegroundApp(screenOn, rt.plugged, rt.currentMa) && hasUsageAccess()) {
-                    currentForegroundPackage(lastTs, lastPkg)
-                } else null
-                if (discharging && screenOn) {
-                    val ma = abs(rt.currentMa.toDouble())
-                    val baselines = screenOnBaseline
-                    baselines.observe(ma)
-
-                    val baseline = baselines.baselineMilliAmps()
-                    if (pkg != null && dtHours > 0.0 && baseline != null) {
-                        val deltaMah = max(0.0, ma - baseline) * dtHours
-                        appEnergyDao.incrementHour(pkg, now, deltaMah, addSamples = 1)
-                    }
+            suspend fun flushPending() {
+                val entries = writeBuffer.snapshot()
+                if (entries.isEmpty()) return
+                try {
+                    appEnergyDao.incrementEntries(entries)
+                    writeBuffer.clear()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Keep the buffer intact and retry on the next reading. Per-app
+                    // attribution is supplemental and must not stop core monitoring.
+                    android.util.Log.w("ForegroundDrain", "Could not flush app-drain estimates", e)
                 }
+            }
 
-                lastPkg = pkg
-                lastTs = now
+            try {
+                batteryRepo.realtimeFlow.collect { rt ->
+                    val now = rt.sample?.timestamp ?: System.currentTimeMillis()
+                    val elapsed = SystemClock.elapsedRealtime()
+                    // Cap the interval: if the flow stalls - doze, a killed process - we have no
+                    // reason to believe one app held the foreground for the whole gap, and
+                    // uncapped this would attribute hours of drain to it on a single reading.
+                    val dtHours = ((now - lastTs).coerceIn(0L, MAX_ATTRIBUTED_GAP_MS)) / 3_600_000.0
+
+                    // Only discharge is attributable. The current is positive on the charger, so
+                    // taking its magnitude used to credit a fast charge to whatever app happened
+                    // to be open - 1500 mA of charging read as 1420 mA of "excess app drain".
+                    val screenOn = rt.sample?.screenOn == true
+                    val discharging = rt.plugged == 0 && rt.currentMa < 0
+                    // UsageStats is a binder/database query. There is no attribution work to do
+                    // while charging or screen-off, so avoid paying for that query on those samples.
+                    val pkg = if (shouldQueryForegroundApp(screenOn, rt.plugged, rt.currentMa) && hasUsageAccess()) {
+                        currentForegroundPackage(lastTs, lastPkg)
+                    } else null
+                    if (discharging && screenOn) {
+                        val ma = abs(rt.currentMa.toDouble())
+                        screenOnBaseline.observe(ma)
+
+                        val baseline = screenOnBaseline.baselineMilliAmps()
+                        if (pkg != null && dtHours > 0.0 && baseline != null) {
+                            val deltaMah = max(0.0, ma - baseline) * dtHours
+                            // Samples can arrive every five seconds. Preserve every estimate in
+                            // memory, but commit them together once a minute instead of forcing a
+                            // Room transaction for every current reading.
+                            writeBuffer.add(pkg, now, elapsed, deltaMah)
+                        }
+                    }
+
+                    if (writeBuffer.shouldFlush(elapsed)) flushPending()
+                    lastPkg = pkg
+                    lastTs = now
+                }
+            } finally {
+                // A user-paused service should not lose the last partial minute.
+                withContext(NonCancellable) { flushPending() }
             }
         }
     }
@@ -141,3 +169,44 @@ class ForegroundDrainTracker(
 
 internal fun shouldQueryForegroundApp(screenOn: Boolean, plugged: Int, currentMa: Int): Boolean =
     screenOn && plugged == 0 && currentMa < 0
+
+internal const val HEURISTIC_FLUSH_INTERVAL_MS = 60_000L
+
+/** Aggregates per-app estimates by their real hourly bucket before one Room transaction. */
+internal class HeuristicWriteBuffer(
+    private val flushIntervalMs: Long = HEURISTIC_FLUSH_INTERVAL_MS
+) {
+    private data class Key(val bucketStart: Long, val packageName: String)
+    private data class Value(var energyMah: Double = 0.0, var samples: Int = 0)
+
+    private val pending = linkedMapOf<Key, Value>()
+    private var firstPendingElapsedMs: Long? = null
+
+    fun add(packageName: String, atMillis: Long, elapsedMs: Long, energyMah: Double) {
+        if (!energyMah.isFinite() || energyMah < 0.0) return
+        val key = Key(hourBucketStart(atMillis), packageName)
+        val value = pending.getOrPut(key) { Value() }
+        value.energyMah += energyMah
+        value.samples++
+        if (firstPendingElapsedMs == null) firstPendingElapsedMs = elapsedMs
+    }
+
+    fun shouldFlush(elapsedMs: Long): Boolean = firstPendingElapsedMs?.let {
+        elapsedMs < it || elapsedMs - it >= flushIntervalMs
+    } == true
+
+    fun snapshot(): List<AppEnergyIncrement> = pending.map { (key, value) ->
+        AppEnergyIncrement(
+            bucketStart = key.bucketStart,
+            packageName = key.packageName,
+            mode = "HEURISTIC",
+            energyMah = value.energyMah,
+            samples = value.samples
+        )
+    }
+
+    fun clear() {
+        pending.clear()
+        firstPendingElapsedMs = null
+    }
+}

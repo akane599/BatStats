@@ -57,8 +57,14 @@ class BatteryRepository(
     val isMonitoringFlow: StateFlow<Boolean> = _isMonitoring.asStateFlow()
 
     private var samplingJob: Job? = null
-    private var pendingSampleCount: Long = 0L
     private val generation = AtomicLong()
+
+    /**
+     * The registered receiver already owns the latest sticky battery intent. Reusing that
+     * immutable copy lets a fast 5-second current poll query only BatteryManager properties;
+     * it does not have to make another registerReceiver binder call on every tick.
+     */
+    @Volatile private var latestBatteryIntent: Intent? = null
 
     /**
      * Battery state arrives from two places at once - the system broadcast on the main
@@ -72,6 +78,7 @@ class BatteryRepository(
     // Broadcast receiver for immediate system updates
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
+            latestBatteryIntent = Intent(intent)
             processBatteryState(intent)
         }
     }
@@ -111,7 +118,6 @@ class BatteryRepository(
 
     suspend fun clearHistory() = sessionMutex.withLock {
         withContext(Dispatchers.IO) { db.clearAllTables() }
-        pendingSampleCount = 0L
         lastPlugged = null
     }
 
@@ -124,7 +130,7 @@ class BatteryRepository(
 
         // Register Receiver for system broadcasts (plug/unplug, % change)
         val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        registerBatteryUpdates(context, batteryReceiver)
+        latestBatteryIntent = registerBatteryUpdates(context, batteryReceiver)?.let(::Intent)
 
         // Start Polling Coroutine for current/voltage fluctuations
         // Android's ACTION_BATTERY_CHANGED is "sticky" but doesn't fire often enough
@@ -135,7 +141,11 @@ class BatteryRepository(
                 .distinctUntilChanged()
                 .collectLatest { intervalMs ->
                     while (isActive) {
-                        val intent = context.registerReceiver(null, filter)
+                        // ACTION_BATTERY_CHANGED keeps latestBatteryIntent current. The
+                        // fallback is only for an OEM that fails to return the initial sticky
+                        // replay when the receiver is first registered.
+                        val intent = latestBatteryIntent ?: BatteryReader.currentIntent(context)
+                            ?.also { latestBatteryIntent = Intent(it) }
                         if (intent != null) {
                             processBatteryState(intent, persist = true)
                         }
@@ -161,7 +171,6 @@ class BatteryRepository(
                 if (generation.get() != stoppedGeneration) return@withLock
                 lastPlugged = null
                 sessionDao.active()?.takeIf { it.autoStarted }?.let { completeSession(it) }
-                flushSampleCount()
             }
         }
 
@@ -170,6 +179,7 @@ class BatteryRepository(
         } catch (_: Exception) {
             // Ignore if already unregistered
         }
+        latestBatteryIntent = null
     }
 
     suspend fun startSession(type: SessionType) = sessionMutex.withLock {
@@ -287,18 +297,9 @@ class BatteryRepository(
                 }
                 if (persist) {
                     batteryDao.insertSample(sample)
-                    pendingSampleCount++
-                    if (pendingSampleCount >= 10) flushSampleCount()
                 }
             }
         }
-    }
-
-    private suspend fun flushSampleCount() {
-        if (pendingSampleCount == 0L) return
-        val count = pendingSampleCount
-        settingsRepository.update { it.copy(totalSamplesCollected = it.totalSamplesCollected + count) }
-        pendingSampleCount = 0
     }
 
     data class Realtime(

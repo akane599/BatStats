@@ -153,6 +153,7 @@ class BatteryMonitorService : Service() {
     }
 
     private fun applyStrategy(trackAppDrain: Boolean, hasAdvanced: Boolean) {
+        advancedDrainTracker.setPrivilegedAccessAvailable(hasAdvanced)
         if (hasAdvanced) {
             drainTracker.stop()
         } else {

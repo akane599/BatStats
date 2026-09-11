@@ -55,8 +55,8 @@ class DrainNotificationManager(
             !state.hasBatteryReading -> context.getString(R.string.monitoring_battery)
             state.isCharging -> "⚡ ${context.getString(R.string.charging)}"
             state.isPowered -> "🔌 ${context.getString(R.string.charging_paused)}"
-            state.isDozing -> "💤 ${context.getString(R.string.dozing)}"
             state.isScreenOn -> "📱 $screenOn"
+            state.isDozing -> "💤 ${context.getString(R.string.dozing)}"
             else -> "🌙 $screenOff"
         }
         val title = if (state.hasBatteryReading && state.batteryLevel in 0..100) {

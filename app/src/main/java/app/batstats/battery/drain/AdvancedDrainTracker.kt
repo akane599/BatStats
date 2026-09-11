@@ -46,6 +46,8 @@ class AdvancedDrainTracker(
     val drainState: StateFlow<DrainState> = _drainState.asStateFlow()
     private val _snapshots = MutableStateFlow<List<DrainSnapshot>>(emptyList())
     val snapshots: StateFlow<List<DrainSnapshot>> = _snapshots.asStateFlow()
+    private val snapshotBuffer = ArrayDeque<DrainSnapshot>()
+    private var lastSnapshotElapsed: Long? = null
     private val _isTracking = MutableStateFlow(false)
     val isTracking: StateFlow<Boolean> = _isTracking.asStateFlow()
     private var receiverRegistered = false
@@ -57,6 +59,7 @@ class AdvancedDrainTracker(
     private var knownCapacityMah = 0.0
     private var lastCapacityReadElapsed: Long? = null
     private var pendingPowerState: Boolean? = null
+    @Volatile private var privilegedAccessAvailable = false
 
     private val stateChangeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -79,6 +82,18 @@ class AdvancedDrainTracker(
     }
 
     fun isRunning(): Boolean = running.get()
+
+    /**
+     * A basic drain session needs no special access. A checkin dump used only as a capacity
+     * fallback does, so never probe shell backends every few minutes on an ordinary device.
+     */
+    fun setPrivilegedAccessAvailable(available: Boolean) {
+        val becameAvailable = available && !privilegedAccessAvailable
+        privilegedAccessAvailable = available
+        if (becameAvailable) synchronized(ledgerLock) {
+            lastCapacityReadElapsed = null
+        }
+    }
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -131,6 +146,8 @@ class AdvancedDrainTracker(
             sessionStartTime = System.currentTimeMillis()
             val reading = readBattery()
             ledger.reset(reading.ledgerReading, running.get())
+            snapshotBuffer.clear()
+            lastSnapshotElapsed = null
             _snapshots.value = emptyList()
             publish(reading)
         }
@@ -194,19 +211,28 @@ class AdvancedDrainTracker(
         publish(reading)
         if (snapshot) {
             val state = _drainState.value
-            _snapshots.update { previous ->
-                (previous + DrainSnapshot(
-                    timestamp = reading.wallTimeMs,
-                    batteryLevel = state.batteryLevel,
-                    batteryMah = state.batteryLevelMah,
-                    currentMa = reading.sample?.currentNowUa?.div(1000)?.toInt(),
-                    isScreenOn = state.isScreenOn,
-                    isCharging = state.isCharging,
-                    isDozing = state.isDozing,
-                    // Both counters have the same since-boot basis, regardless of access.
-                    cpuAwakeTimeMs = reading.uptimeMs,
-                    deepSleepTimeMs = reading.ledgerReading.sleptMs
-                )).takeLast(1000)
+            val candidate = DrainSnapshot(
+                timestamp = reading.wallTimeMs,
+                batteryLevel = state.batteryLevel,
+                batteryMah = state.batteryLevelMah,
+                currentMa = reading.sample?.currentNowUa?.div(1000)?.toInt(),
+                isScreenOn = state.isScreenOn,
+                isCharging = state.isCharging,
+                isDozing = state.isDozing,
+                // Both counters have the same since-boot basis, regardless of access.
+                cpuAwakeTimeMs = reading.uptimeMs,
+                deepSleepTimeMs = reading.ledgerReading.sleptMs
+            )
+            if (shouldRecordDrainSnapshot(
+                    snapshotBuffer.lastOrNull(), lastSnapshotElapsed,
+                    candidate, reading.ledgerReading.elapsedMs
+                )) {
+                snapshotBuffer.addLast(candidate)
+                while (snapshotBuffer.size > MAX_DRAIN_SNAPSHOTS) snapshotBuffer.removeFirst()
+                lastSnapshotElapsed = reading.ledgerReading.elapsedMs
+                // The graph only needs a minute-scale battery-level history. Publishing a
+                // copied 1,000-element list on every 5-second current tick was pure churn.
+                _snapshots.value = snapshotBuffer.toList()
             }
         }
     }
@@ -251,6 +277,7 @@ class AdvancedDrainTracker(
         synchronized(ledgerLock) {
             if (!running.get() || generation != sessionGeneration || knownCapacityMah > 0.0) return
         }
+        if (!privilegedAccessAvailable) return
         val intervalMs = settingsRepository.flow.first().detailedStatsIntervalMs
         val now = SystemClock.elapsedRealtime()
         synchronized(ledgerLock) {
@@ -274,6 +301,24 @@ class AdvancedDrainTracker(
             }
         }
     }
+}
+
+internal const val DRAIN_SNAPSHOT_INTERVAL_MS = 60_000L
+internal const val MAX_DRAIN_SNAPSHOTS = 1_000
+
+/** Keep state boundaries and level changes, but coalesce identical high-rate current polls. */
+internal fun shouldRecordDrainSnapshot(
+    previous: DrainSnapshot?,
+    previousElapsedMs: Long?,
+    current: DrainSnapshot,
+    currentElapsedMs: Long
+): Boolean {
+    if (previous == null || previousElapsedMs == null || currentElapsedMs < previousElapsedMs) return true
+    return currentElapsedMs - previousElapsedMs >= DRAIN_SNAPSHOT_INTERVAL_MS ||
+        current.batteryLevel != previous.batteryLevel ||
+        current.isScreenOn != previous.isScreenOn ||
+        current.isCharging != previous.isCharging ||
+        current.isDozing != previous.isDozing
 }
 
 /**

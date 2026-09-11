@@ -27,15 +27,26 @@ abstract class BatteryWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray
     ) {
-        refresh(context)
+        WidgetUpdater.noteWidgetIds(javaClass, appWidgetIds)
+        refresh(context, allProviders = false)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == WidgetUpdater.ACTION_REFRESH) refresh(context)
+        if (intent.action == WidgetUpdater.ACTION_REFRESH) refresh(context, allProviders = true)
     }
 
-    private fun refresh(context: Context) {
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        WidgetUpdater.invalidateProvider(javaClass)
+        super.onDeleted(context, appWidgetIds)
+    }
+
+    override fun onDisabled(context: Context) {
+        WidgetUpdater.invalidateProvider(javaClass)
+        super.onDisabled(context)
+    }
+
+    private fun refresh(context: Context, allProviders: Boolean) {
         // Reading the temperature unit is asynchronous, and the process is killable as soon
         // as onReceive returns.
         val appContext = context.applicationContext
@@ -45,7 +56,11 @@ abstract class BatteryWidgetProvider : AppWidgetProvider() {
                 val fahrenheit = runCatching {
                     BatteryGraph.settings.flow.first().useFahrenheit
                 }.getOrDefault(false)
-                WidgetUpdater.refreshFromSystem(appContext, fahrenheit)
+                if (allProviders) {
+                    WidgetUpdater.refreshFromSystem(appContext, fahrenheit)
+                } else {
+                    WidgetUpdater.refreshProviderFromSystem(appContext, javaClass, fahrenheit)
+                }
             } finally {
                 pending.finish()
             }

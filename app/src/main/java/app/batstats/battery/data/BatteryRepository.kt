@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import app.batstats.battery.data.db.BatterySample
 import app.batstats.battery.data.db.BatteryDatabase
 import app.batstats.battery.data.db.BatterySample
 import app.batstats.battery.data.db.ChargeSession
@@ -15,7 +16,11 @@ import app.batstats.settings.monitoringIntervalMs
 import io.github.mlmgames.settings.core.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
+import androidx.room.withTransaction
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
@@ -50,6 +55,7 @@ class BatteryRepository(
 
     private var samplingJob: Job? = null
     private var pendingSampleCount: Long = 0L
+    private val generation = AtomicLong()
 
     /**
      * Battery state arrives from two places at once - the system broadcast on the main
@@ -94,10 +100,17 @@ class BatteryRepository(
         return batteryDao.samplesBetween(start, end)
     }
 
+    suspend fun clearHistory() = sessionMutex.withLock {
+        withContext(Dispatchers.IO) { db.clearAllTables() }
+        pendingSampleCount = 0L
+        lastPlugged = null
+    }
+
     suspend fun getSettings(): AppSettings = settingsRepository.flow.first()
 
     fun startSampling() {
         if (_isMonitoring.value) return
+        generation.incrementAndGet()
         _isMonitoring.value = true
 
         // Register Receiver for system broadcasts (plug/unplug, % change)
@@ -126,20 +139,17 @@ class BatteryRepository(
     fun stopSampling() {
         if (!_isMonitoring.value) return
         _isMonitoring.value = false
+        val stoppedGeneration = generation.incrementAndGet()
 
         samplingJob?.cancel()
         samplingJob = null
 
-        // Drop the plug baseline: the next reading should re-seed it rather than compare
-        // against however the world looked before monitoring was switched off.
-        lastPlugged = null
-
-        if (pendingSampleCount > 0) {
-            scope.launch {
-                settingsRepository.update {
-                    it.copy(totalSamplesCollected = it.totalSamplesCollected + pendingSampleCount)
-                }
-                pendingSampleCount = 0
+        scope.launch {
+            sessionMutex.withLock {
+                if (generation.get() != stoppedGeneration) return@withLock
+                lastPlugged = null
+                sessionDao.active()?.takeIf { it.autoStarted }?.let { completeSession(it) }
+                flushSampleCount()
             }
         }
 
@@ -151,7 +161,14 @@ class BatteryRepository(
     }
 
     suspend fun startSession(type: SessionType) = sessionMutex.withLock {
-        startSession(type, autoStarted = false)
+        if (!_isMonitoring.value || _realtime.value.sample == null) return@withLock
+        db.withTransaction {
+            val active = sessionDao.active()
+            // Repeated taps must not create another open manual session.
+            if (active != null && !active.autoStarted) return@withTransaction
+            active?.let { completeSession(it) }
+            startSession(type, autoStarted = false)
+        }
     }
 
     suspend fun endCurrentSession() = sessionMutex.withLock {
@@ -202,63 +219,76 @@ class BatteryRepository(
      * Sessions were manual-only before this: unless you remembered to press the button at
      * both ends of every charge, the screen stayed empty.
      */
-    private suspend fun onPluggedChanged(charging: Boolean) = sessionMutex.withLock {
+    private suspend fun onPluggedChanged(charging: Boolean) = db.withTransaction {
         val wanted = if (charging) SessionType.CHARGE else SessionType.DISCHARGE
         val active = sessionDao.active()
         if (active != null) {
             // A session someone started by hand is theirs to end.
-            if (!active.autoStarted) return@withLock
+            if (!active.autoStarted) return@withTransaction
             // The system broadcast and the polling loop can both report the same plug
             // change; without this the second one would close the session the first just
             // opened and leave an empty one behind.
-            if (active.type == wanted) return@withLock
+            if (active.type == wanted) return@withTransaction
             completeSession(active)
         }
         startSession(wanted, autoStarted = true)
     }
 
-    private fun processBatteryState(intent: Intent, persist: Boolean = false) {
-        // Shared with the widgets, which read the same sticky broadcast without a service.
-        val sample = BatteryReader.sampleFrom(context, intent)
-        val pluggedState = sample.plugged
+    /** Refresh the dashboard without starting a service or writing history. */
+    fun refreshBatteryReading() {
+        val expected = generation.get()
+        scope.launch {
+            sessionMutex.withLock {
+                if (expected != generation.get()) return@withLock
+                BatteryReader.currentSample(context)?.let { updateRealtime(it) }
+            }
+        }
+    }
+
+    private fun updateRealtime(sample: BatterySample) {
+        if (sample.levelPercent !in 0..100) return
         val currentNow = sample.currentNowUa ?: 0L
         val voltage = sample.voltageMv ?: 0
-
-        // Calculate Power (mW) = (uA * mV) / 1,000,000
-        val powerMw = (abs(currentNow) * voltage) / 1_000_000f
-
-        // Update StateFlow for UI
         _realtime.value = Realtime(
             level = sample.levelPercent,
-            plugged = pluggedState,
+            plugged = sample.plugged,
             currentMa = (currentNow / 1000).toInt(),
             voltageMv = voltage,
-            powerMw = powerMw,
+            powerMw = (abs(currentNow.toDouble()) * voltage / 1_000_000).toFloat(),
             temperatureC = (sample.temperatureDeciC ?: 0) / 10f,
             sample = sample
         )
+    }
 
-        // Charger came or went. Checked on every update, not just persisted ones: the
-        // system broadcast is what reports a plug change promptly.
-        val wasPlugged = lastPlugged
-        lastPlugged = pluggedState
-        if (wasPlugged != null && (wasPlugged == 0) != (pluggedState == 0)) {
-            scope.launch { onPluggedChanged(charging = pluggedState != 0) }
-        }
-
-        // Persist to DB
-        if (persist) {
-            scope.launch {
-                batteryDao.insertSample(sample)
-                pendingSampleCount++
-                if (pendingSampleCount >= 10) {
-                    settingsRepository.update {
-                        it.copy(totalSamplesCollected = it.totalSamplesCollected + pendingSampleCount)
-                    }
-                    pendingSampleCount = 0
+    private fun processBatteryState(intent: Intent, persist: Boolean = false) {
+        val expected = generation.get()
+        scope.launch {
+            // Serialize the reading, session boundary, insert and sample counter together.
+            // A queued reading from a previous monitoring run must not reopen a session.
+            sessionMutex.withLock {
+                if (!_isMonitoring.value || expected != generation.get()) return@withLock
+                val sample = BatteryReader.sampleFrom(context, intent)
+                if (sample.levelPercent !in 0..100) return@withLock
+                updateRealtime(sample)
+                val wasPlugged = lastPlugged
+                lastPlugged = sample.plugged
+                if (wasPlugged == null || (wasPlugged == 0) != (sample.plugged == 0)) {
+                    onPluggedChanged(charging = sample.plugged != 0)
+                }
+                if (persist) {
+                    batteryDao.insertSample(sample)
+                    pendingSampleCount++
+                    if (pendingSampleCount >= 10) flushSampleCount()
                 }
             }
         }
+    }
+
+    private suspend fun flushSampleCount() {
+        if (pendingSampleCount == 0L) return
+        val count = pendingSampleCount
+        settingsRepository.update { it.copy(totalSamplesCollected = it.totalSamplesCollected + count) }
+        pendingSampleCount = 0
     }
 
     data class Realtime(

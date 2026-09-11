@@ -63,7 +63,7 @@ data class DrainState(
     
     /** Wall clock since the session began, including any time spent charging. */
     val totalTimeMs: Long
-        get() = System.currentTimeMillis() - sessionStartTime
+        get() = (lastUpdateTime - sessionStartTime).coerceAtLeast(0L)
 
     /**
      * Time actually accounted for. Charging stretches are excluded from the buckets - the

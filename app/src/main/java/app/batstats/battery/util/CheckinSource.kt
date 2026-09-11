@@ -47,7 +47,7 @@ class CheckinSource(
     }
 
     /** Drops the cached dump - after a `--reset`, or when a collector stops. */
-    fun invalidate() {
+    suspend fun invalidate() = lock.withLock {
         cached = null
         cachedAt = 0L
     }

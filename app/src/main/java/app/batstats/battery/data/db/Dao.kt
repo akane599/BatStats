@@ -8,6 +8,9 @@ interface BatteryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSample(sample: BatterySample): Long
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSamples(samples: List<BatterySample>)
+
     @Query("SELECT * FROM battery_samples ORDER BY timestamp DESC LIMIT 1")
     suspend fun lastSample(): BatterySample?
 
@@ -22,6 +25,13 @@ interface BatteryDao {
 interface SessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(session: ChargeSession)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(sessions: List<ChargeSession>)
+
+    /** Include sessions that overlap the selected interval, including an active session. */
+    @Query("SELECT * FROM charge_sessions WHERE startTime <= :to AND (endTime IS NULL OR endTime >= :from) ORDER BY startTime DESC")
+    suspend fun sessionsOverlapping(from: Long, to: Long): List<ChargeSession>
 
     @Query("SELECT * FROM charge_sessions WHERE endTime IS NULL LIMIT 1")
     suspend fun active(): ChargeSession?
@@ -64,6 +74,11 @@ interface AlarmDao {
  */
 @Dao
 interface AppEnergyDao {
+    @Transaction
+    suspend fun incrementBatch(deltas: Map<String, Double>, atMillis: Long, mode: String) {
+        deltas.forEach { (pkg, delta) -> incrementHour(pkg, atMillis, delta, 1, mode) }
+    }
+
     @Transaction
     suspend fun incrementHour(packageName: String, atMillis: Long, deltaMah: Double, addSamples: Int, mode: String = "HEURISTIC") {
         val bucket = hourBucketStart(atMillis)

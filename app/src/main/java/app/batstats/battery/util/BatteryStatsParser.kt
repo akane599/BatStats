@@ -12,6 +12,7 @@ object BatteryStatsParser {
         val capturedAt: Long = System.currentTimeMillis(),
         val statsSinceCharged: Boolean = true,
         val batteryRealtimeMs: Long = 0L,
+        val batteryUptimeMs: Long = 0L,
         val screenOnTimeMs: Long = 0L,
         val screenOffDischargePercent: Float = 0f,
         val screenOnDischargePercent: Float = 0f,
@@ -245,6 +246,7 @@ object BatteryStatsParser {
         val uidTimes = mutableMapOf<Int, UidTimes>()
 
         var batteryRealtimeMs = 0L
+        var batteryUptimeMs = 0L
         var screenOnTimeMs = 0L
         var screenOffDischarge = 0f
         var screenOnDischarge = 0f
@@ -363,6 +365,7 @@ object BatteryStatsParser {
                     // Battery core: 9,0,l,bt,startCount,battRealtime,battUptime,...
                     parts[2] == "l" && parts[3] == "bt" -> {
                         batteryRealtimeMs = parts.getOrNull(5)?.toLongOrNull() ?: 0L
+                        batteryUptimeMs = parts.getOrNull(6)?.toLongOrNull() ?: 0L
                     }
 
                     // Misc: 9,0,l,m,screenOnTime,phoneOnTime,... (also carries Doze totals)
@@ -431,6 +434,7 @@ object BatteryStatsParser {
         return FullSnapshot(
             capturedAt = System.currentTimeMillis(),
             batteryRealtimeMs = batteryRealtimeMs,
+            batteryUptimeMs = batteryUptimeMs,
             screenOnTimeMs = screenOnTimeMs,
             screenOffDischargePercent = screenOffDischarge,
             screenOnDischargePercent = screenOnDischarge,

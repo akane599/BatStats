@@ -2,7 +2,7 @@ name: Build APK
 
 # Produces installable APKs you can download from the run's Artifacts section.
 # Run it by hand from the Actions tab (any branch, pick the variant and ABI), or let it
-# run automatically on pushes to the default branch and on pull requests.
+# run automatically on main, Codex working branches, and pull requests.
 on:
   workflow_dispatch:
     inputs:
@@ -19,7 +19,7 @@ on:
         type: choice
         options: [arm64-v8a, armeabi-v7a, x86_64, x86, universal, all]
   push:
-    branches: [main]
+    branches: [main, 'codex/**']
     paths-ignore:
       - '**.md'
       - 'fastlane/**'
@@ -91,6 +91,7 @@ jobs:
           echo "gradle_args=$args" >> "$GITHUB_OUTPUT"
 
       - name: Decode signing keystore
+        if: steps.params.outputs.build_type == 'release'
         id: keystore
         env:
           KEYSTORE: ${{ secrets.KEYSTORE }}
@@ -128,28 +129,24 @@ jobs:
         if: always()
         run: rm -f "$GITHUB_WORKSPACE/release.keystore"
 
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.sha }}
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Summarise APKs
         run: |
           set -euo pipefail
           dir="app/build/outputs/apk/${{ steps.params.outputs.build_type }}"
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          : > "$dir/SHA256SUMS"
           {
             echo "### APKs"
             echo
-            echo "Variant: \`${{ steps.params.outputs.build_type }}\` · Commit: \`${{ steps.params.outputs.sha }}\` · Signed: \`${{ steps.keystore.outputs.available }}\`"
-            echo
-            echo '| File | Size |'
-            echo '| --- | --- |'
-            # The apk-dist plugin also leaves the raw AGP names behind; list the friendly ones.
-            for apk in "$dir"/batstats-*.apk; do
-              [ -e "$apk" ] || continue
-              printf '| %s | %s |\n' "$(basename "$apk")" "$(du -h "$apk" | cut -f1)"
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: batstats-${{ steps.params.outputs.build_type }}-${{ steps.params.outputs.sha }}
-          path: app/build/outputs/apk/${{ steps.params.outputs.build_type }}/batstats-*.apk
-          if-no-files-found: error
-          retention-days: 30
+            echo "Variant: \`${{ steps.params.outputs.build_type }}\` · Commit: \`${{ steps.params.outputs.sha }}\`"

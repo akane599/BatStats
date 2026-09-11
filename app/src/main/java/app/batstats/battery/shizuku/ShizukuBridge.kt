@@ -10,6 +10,7 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
+import app.batstats.battery.util.readShellOutput
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -27,7 +28,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import rikka.shizuku.Shizuku.UserServiceArgs
 import rikka.shizuku.ShizukuProvider
-import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -48,7 +49,7 @@ class ShizukuBridge(private val context: Context) {
         const val PERMISSION_REQUEST_CODE = 1001
 
         /** Bump whenever [ShellUserService] changes so Shizuku restarts a stale instance. */
-        private const val SERVICE_VERSION = 2
+        private const val SERVICE_VERSION = 3
 
         private const val BIND_TIMEOUT_MS = 10_000L
         private const val DEFAULT_CMD_TIMEOUT_MS = 25_000L
@@ -58,7 +59,6 @@ class ShizukuBridge(private val context: Context) {
 
         /** dumpsys --checkin tops out around a few MB; the cap only guards against runaway output. */
         private const val MAX_OUTPUT_BYTES = 12 * 1024 * 1024
-        private const val COPY_BUFFER_BYTES = 64 * 1024
 
         private const val PING_RETRIES = 4
         private const val PING_RETRY_DELAY_MS = 120L
@@ -124,6 +124,7 @@ class ShizukuBridge(private val context: Context) {
         _running.value = false
         _granted.value = false
         binderRef.set(null)
+        pendingBind.getAndSet(null)?.complete(null)
     }
 
     private val permissionResultListener =
@@ -321,13 +322,17 @@ class ShizukuBridge(private val context: Context) {
 
         // Backstop: the helper enforces its own timeout, but if that process vanishes without
         // closing the descriptor we would block forever. Closing the fd aborts the read.
+        val timedOut = AtomicBoolean(false)
         val watchdog = scope.launch {
             delay(timeoutMs + READ_GRACE_MS)
+            timedOut.set(true)
             Log.w(TAG, "Pipe read timed out for: $cmd")
             runCatching { readSide.close() }
         }
         return try {
-            readAll(readSide)
+            readAll(readSide).also {
+                if (timedOut.get()) throw IOException("Command output timed out")
+            }
         } finally {
             watchdog.cancel()
         }
@@ -335,21 +340,7 @@ class ShizukuBridge(private val context: Context) {
 
     private fun readAll(pfd: ParcelFileDescriptor): String {
         ParcelFileDescriptor.AutoCloseInputStream(pfd).use { input ->
-            val sink = ByteArrayOutputStream(COPY_BUFFER_BYTES)
-            val buffer = ByteArray(COPY_BUFFER_BYTES)
-            var total = 0
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                if (total + read >= MAX_OUTPUT_BYTES) {
-                    sink.write(buffer, 0, MAX_OUTPUT_BYTES - total)
-                    Log.w(TAG, "Output truncated at $MAX_OUTPUT_BYTES bytes")
-                    break
-                }
-                sink.write(buffer, 0, read)
-                total += read
-            }
-            return sink.toString(Charsets.UTF_8.name())
+            return readShellOutput(input, MAX_OUTPUT_BYTES)
         }
     }
 

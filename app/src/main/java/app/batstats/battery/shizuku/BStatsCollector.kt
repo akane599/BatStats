@@ -6,6 +6,7 @@ import app.batstats.battery.util.CheckinSource
 import app.batstats.battery.util.PackageNameResolver
 import app.batstats.battery.util.ShellRunner
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -38,63 +39,39 @@ class BstatsCollector(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val running = AtomicBoolean(false)
     private var job: Job? = null
-    private var last: Map<Int, Double> = emptyMap()
 
     fun isRunning(): Boolean = running.get()
 
     fun start(pollSec: Long = 300L) {
         if (!running.compareAndSet(false, true)) return
         job = scope.launch {
+            var previous: CheckinParser.Snapshot? = null
+            val pollIntervalMs = pollSec.coerceIn(15L, 86_400L) * 1000L
+            var retryDelayMs = 15_000L
             while (isActive) {
                 try {
                     // Shared with the Detailed Stats screen: whichever asks first pays for
                     // the dump, the other reads the same copy.
-                    val result = checkinSource.get(maxAgeMs = pollSec * 1000L / 2)
+                    val result = checkinSource.get(maxAgeMs = pollIntervalMs / 2)
                     if (result !is ShellRunner.Outcome.Success) {
                         Log.w(TAG, "No privileged access for batterystats --checkin")
-                        delay(5_000)
+                        // Shizuku may be off for hours. Avoid dumping/probing every five
+                        // seconds for the whole outage, while retrying quickly at first.
+                        delay(retryDelayMs)
+                        retryDelayMs = (retryDelayMs * 2).coerceAtMost(pollIntervalMs)
                         continue
                     }
 
                     val snap = CheckinParser.parse(result.output.lineSequence())
                     val now = System.currentTimeMillis()
 
-                    if (last.isNotEmpty()) {
-                        for ((uid, cur) in snap.perUidMah) {
-                            val prev = last[uid] ?: 0.0
-                            val delta = max(0.0, cur - prev)
-                            if (delta > 0.0001) {
-                                dao.incrementHour(
-                                    packageName = nameFor(uid, snap.uidToPackage),
-                                    atMillis = now,
-                                    deltaMah = delta,
-                                    addSamples = 1,
-                                    mode = result.mode.name
-                                )
-                            }
-                        }
+                    val deltas = mutableMapOf<String, Double>()
+                    energyDeltas(previous, snap).forEach { (uid, delta) ->
+                        val pkg = nameFor(uid, snap.uidToPackage)
+                        deltas[pkg] = (deltas[pkg] ?: 0.0) + delta
                     }
-                    last = snap.perUidMah
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error in polling loop", e)
-                }
-                delay(pollSec * 1000L)
-            }
-        }
-    }
-
-    /**
-     * The dump carries its own uid -> package map, but it is incomplete whenever the caller
-     * could not see other packages - through ADB-granted DUMP, dumpsys runs as BatStats
-     * itself. PackageManager fills the gaps so the stored rows are named, not "uid:10234".
-     */
-    private fun nameFor(uid: Int, fromDump: Map<Int, String>): String =
-        fromDump[uid] ?: packageNames.nameFor(uid) ?: "uid:$uid"
-
-    fun stop() {
-        running.set(false)
-        job?.cancel()
-        job = null
-        last = emptyMap()
-    }
-}
+                    dao.incrementBatch(deltas, now, result.mode.name)
+                    previous = snap
+                    retryDelayMs = 15_000L
+                } catch (ce: CancellationException) {
+                    throw ce

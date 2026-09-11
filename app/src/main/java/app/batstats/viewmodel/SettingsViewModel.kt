@@ -2,6 +2,11 @@ package app.batstats.viewmodel
 
 import android.content.Context
 import android.net.Uri
+import android.content.Intent
+import app.batstats.battery.BatteryGraph
+import app.batstats.battery.service.BatteryMonitorService
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.batstats.settings.AppSettings
@@ -53,7 +58,9 @@ class SettingsViewModel(
             when (val result = backupManager.export()) {
                 is ExportResult.Success -> {
                     try {
-                        context.contentResolver.openOutputStream(uri)?.use { output ->
+                        val stream = context.contentResolver.openOutputStream(uri, "wt")
+                            ?: return@withContext "Failed to open the selected file"
+                        stream.use { output ->
                             output.write(result.json.toByteArray())
                         }
                         "Settings saved to ${uri.path}"
@@ -64,6 +71,13 @@ class SettingsViewModel(
                 is ExportResult.Error -> "Export generation failed: ${result.message}"
             }
         }
+    }
+
+    suspend fun clearBatteryData() {
+        context.stopService(Intent(context, BatteryMonitorService::class.java))
+        withTimeout(5_000L) { BatteryGraph.repo.isMonitoringFlow.first { !it } }
+        BatteryGraph.repo.clearHistory()
+        repository.update { it.copy(totalSamplesCollected = 0L) }
     }
 
     suspend fun import(json: String): ImportResult = backupManager.import(json)

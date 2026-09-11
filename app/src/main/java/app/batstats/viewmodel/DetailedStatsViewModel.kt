@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.CancellationException
 
 class DetailedStatsViewModel(
     private val collector: DetailedStatsCollector,
@@ -112,8 +114,10 @@ class DetailedStatsViewModel(
      */
     fun refresh(forceRefresh: Boolean = false) {
         if (!forceRefresh && refreshJob?.isActive == true) return
-        refreshJob?.cancel()
+        val previous = refreshJob
+        previous?.cancel()
         refreshJob = viewModelScope.launch {
+            previous?.join()
             if (forceRefresh) shellRunner.invalidateMode()
 
             // ADB grants and Shizuku can both change while the app is alive.
@@ -153,7 +157,10 @@ class DetailedStatsViewModel(
 
     suspend fun resetStats(): Boolean {
         return try {
+            refreshJob?.cancelAndJoin()
             if (_hasAdvanced.value) collector.resetStats() else false
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             false
         }

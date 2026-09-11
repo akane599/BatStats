@@ -43,7 +43,7 @@ internal class DrainTotals(
         drainMah: Double
     ) {
         if (elapsedMs <= 0L) return
-        val drain = if (drainMah > 0.0) drainMah else 0.0
+        val drain = if (drainMah.isFinite() && drainMah > 0.0) drainMah else 0.0
 
         if (screenOn) {
             screenOnTimeMs += elapsedMs

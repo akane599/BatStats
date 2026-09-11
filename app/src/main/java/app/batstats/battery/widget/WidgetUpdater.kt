@@ -71,12 +71,16 @@ object WidgetUpdater {
             ctx,
             BatteryLevelWidget::class.java,
             ctx.getString(R.string.widget_battery),
-            "${s.levelPercent}%"
+            if (s.levelPercent in 0..100) "${s.levelPercent}%" else EM_DASH
         )
     }
 
     private fun updateTemp(ctx: Context, s: BatterySample, useFahrenheit: Boolean) {
-        val tempC = (s.temperatureDeciC ?: 0) / 10.0
+        if (s.temperatureDeciC == null) {
+            setAll(ctx, BatteryTempWidget::class.java, ctx.getString(R.string.widget_temperature), EM_DASH)
+            return
+        }
+        val tempC = s.temperatureDeciC / 10.0
         val value = if (useFahrenheit) {
             String.format(Locale.getDefault(), "%.1f °F", tempC * 9 / 5 + 32)
         } else {

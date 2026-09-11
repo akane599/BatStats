@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -65,16 +66,16 @@ class DetailedStatsCollector(
         _error.value = null
     }
 
-    suspend fun refresh(): Boolean {
+    suspend fun refresh(): Boolean = withContext(Dispatchers.Default) {
         if (!refreshing.compareAndSet(false, true)) {
             Log.d(TAG, "Refresh already in progress")
-            return false
+            return@withContext false
         }
 
         _isRefreshing.value = true
         Log.d(TAG, "Starting refresh...")
 
-        return try {
+        try {
             var hasData = false
             var firstFailure: String? = null
 
@@ -109,7 +110,7 @@ class DetailedStatsCollector(
             // Per-app power split by process state. Current Android reports this only in
             // the human-readable dump - the checkin format carries a per-app total and no
             // breakdown at all - so it takes a second, filtered pass.
-            if (_snapshot.value != null) {
+            if (hasData) {
                 when (val power = shellRunner.exec(BatteryStatsParser.POWER_USE_COMMAND)) {
                     is ShellRunner.Outcome.Success -> {
                         val byUid = BatteryStatsParser.parseEstimatedPowerUse(power.output)
@@ -128,7 +129,6 @@ class DetailedStatsCollector(
             when (val idle = shellRunner.exec("dumpsys deviceidle")) {
                 is ShellRunner.Outcome.Success -> {
                     _deviceIdle.value = BatteryStatsParser.parseDeviceIdle(idle.output)
-                    hasData = true
                 }
 
                 is ShellRunner.Outcome.Failure -> Log.w(TAG, "deviceidle failed: ${idle.message}")
@@ -138,7 +138,6 @@ class DetailedStatsCollector(
             when (val power = shellRunner.exec("dumpsys power")) {
                 is ShellRunner.Outcome.Success -> {
                     _powerManager.value = BatteryStatsParser.parsePowerManager(power.output)
-                    hasData = true
                 }
 
                 is ShellRunner.Outcome.Failure -> Log.w(TAG, "power failed: ${power.message}")

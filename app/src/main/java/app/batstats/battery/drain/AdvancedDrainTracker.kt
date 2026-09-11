@@ -10,6 +10,8 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import app.batstats.battery.shizuku.ShizukuBridge
+import app.batstats.battery.util.BatteryReader
+import app.batstats.battery.util.CheckinSource
 import app.batstats.battery.util.BatteryCapacity
 import app.batstats.battery.util.BatteryStatsParser
 import app.batstats.battery.util.ShellRunner
@@ -43,6 +45,7 @@ class AdvancedDrainTracker(
     private val shizukuBridge: ShizukuBridge,
     private val shellRunner: ShellRunner,
     private val settingsRepository: SettingsRepository<AppSettings>,
+    private val checkinSource: CheckinSource,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 ) {
     companion object {
@@ -74,12 +77,8 @@ class AdvancedDrainTracker(
 
     private var receiverRegistered = false
 
-    /** Carries a placeholder so the mAh fallback has something to work with. */
-    private var estimatedCapacityMah: Double = 4000.0
-
     /**
-     * Only ever set from a real source (batterystats, or the charge counter). Unlike
-     * [estimatedCapacityMah], 0 here means "unknown" and percentages are left off.
+     * Only ever set from a real source (batterystats, or the charge counter). Here, 0 means "unknown" and percentages are left off.
      */
     private var knownCapacityMah: Double = 0.0
 
@@ -107,9 +106,10 @@ class AdvancedDrainTracker(
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     // Timestamp the boundary here so it is exact, but take the readings off
                     // the main thread - this fires on every screen unlock.
-                    val at = System.currentTimeMillis()
-                    scope.launch {
-                        advanceLedger(at)
+                    if (running.get()) {
+                        // Only local fuel-gauge reads: book the boundary before a later
+                        // broadcast or poll can change the device state again.
+                        advanceLedger()
                         updateDrainState()
                     }
                 }
@@ -142,6 +142,8 @@ class AdvancedDrainTracker(
                         _snapshots.update { (it + snapshot).takeLast(1000) }
                     }
                     updateDrainState()
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in tracking loop", e)
                 }
@@ -161,7 +163,7 @@ class AdvancedDrainTracker(
 
         // Book whatever the final segment earned, then stop accruing.
         synchronized(ledgerLock) {
-            closeSegment(System.currentTimeMillis())
+            closeSegment(SystemClock.elapsedRealtime())
             openSegment = null
         }
         updateDrainState()
@@ -176,7 +178,7 @@ class AdvancedDrainTracker(
         lastSleepRatio = 0.0
         _snapshots.value = emptyList()
         _drainState.value = DrainState(sessionStartTime = sessionStartTime)
-        advanceLedger()
+        if (running.get()) advanceLedger()
         Log.i(TAG, "Session reset")
     }
 
@@ -217,8 +219,9 @@ class AdvancedDrainTracker(
 
     /** One stretch of time during which the device stayed in a single state. */
     private class Segment(
-        val startedAt: Long,
+        val startedElapsedMs: Long,
         val startChargeMah: Double,
+        val counterAvailable: Boolean,
         /** Cumulative time the CPU had been suspended when this segment opened. */
         val startSleptMs: Long,
         val screenOn: Boolean,
@@ -234,12 +237,14 @@ class AdvancedDrainTracker(
      * Closes the running segment and opens a fresh one from this instant. Called on every
      * state change and on every poll, so no segment ever spans a change of state.
      */
-    private fun advanceLedger(now: Long = System.currentTimeMillis()) {
+    private fun advanceLedger(now: Long = SystemClock.elapsedRealtime()) {
         synchronized(ledgerLock) {
+            if (!running.get()) return
             closeSegment(now)
             openSegment = Segment(
-                startedAt = now,
+                startedElapsedMs = now,
                 startChargeMah = getCurrentBatteryMah(),
+                counterAvailable = hasChargeCounter(),
                 startSleptMs = sleptSinceBootMs(),
                 screenOn = powerManager.isInteractive,
                 charging = isCharging(),
@@ -251,7 +256,7 @@ class AdvancedDrainTracker(
     /** Must hold [ledgerLock]. */
     private fun closeSegment(now: Long) {
         val segment = openSegment ?: return
-        val elapsed = now - segment.startedAt
+        val elapsed = now - segment.startedElapsedMs
         if (elapsed <= 0L) return
 
         // A segment that touched the charger tells us nothing about drain: the battery was
@@ -263,7 +268,8 @@ class AdvancedDrainTracker(
             lastSleepRatio = slept.toDouble() / elapsed
         }
 
-        val drain = max(0.0, segment.startChargeMah - getCurrentBatteryMah())
+        val drain = if (segment.counterAvailable == hasChargeCounter())
+            max(0.0, segment.startChargeMah - getCurrentBatteryMah()) else 0.0
         totals.credit(segment.screenOn, segment.active, elapsed, slept, drain)
     }
 
@@ -271,11 +277,12 @@ class AdvancedDrainTracker(
     private fun totalsIncludingOpenSegment(now: Long): DrainTotals = synchronized(ledgerLock) {
         val snapshot = totals.copy()
         val segment = openSegment ?: return snapshot
-        val elapsed = now - segment.startedAt
+        val elapsed = now - segment.startedElapsedMs
         if (elapsed <= 0L || segment.charging || isCharging()) return snapshot
 
         val slept = (sleptSinceBootMs() - segment.startSleptMs).coerceIn(0L, elapsed)
-        val drain = max(0.0, segment.startChargeMah - getCurrentBatteryMah())
+        val drain = if (segment.counterAvailable == hasChargeCounter())
+            max(0.0, segment.startChargeMah - getCurrentBatteryMah()) else 0.0
         snapshot.credit(segment.screenOn, segment.active, elapsed, slept, drain)
         snapshot
     }
@@ -314,7 +321,8 @@ class AdvancedDrainTracker(
             BatteryCapacity.measuredMah(context)?.let { knownCapacityMah = it }
         }
 
-        val t = totalsIncludingOpenSegment(now)
+        // Duration accounting must not jump when the wall clock is corrected.
+        val t = totalsIncludingOpenSegment(SystemClock.elapsedRealtime())
 
         _drainState.value = DrainState(
             timestamp = now,
@@ -365,22 +373,20 @@ class AdvancedDrainTracker(
         return if (raw >= 0 && scale > 0) (raw * 100 / scale) else 0
     }
 
+    private fun hasChargeCounter(): Boolean =
+        batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) > 0
+
     private fun getCurrentBatteryMah(): Double {
         val chargeCounter = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
         return if (chargeCounter > 0) {
             chargeCounter / 1000.0
         } else {
-            (getBatteryLevel() / 100.0) * estimatedCapacityMah
+            (getBatteryLevel() / 100.0) * knownCapacityMah
         }
     }
 
-    private fun getCurrentNowMa(): Int {
-        var current = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-        if (current == 0L || current == Long.MIN_VALUE) {
-            current = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
-        }
-        return (current / 1000).toInt()
-    }
+    private fun getCurrentNowMa(): Int =
+        ((BatteryReader.currentNowUa(batteryManager) ?: 0L) / 1000).toInt()
 
     private fun isCharging(): Boolean {
         val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -406,16 +412,16 @@ class AdvancedDrainTracker(
         }
 
         try {
-            val result = shellRunner.run("dumpsys batterystats --checkin")
-            if (result != null) {
+            val result = checkinSource.get(maxAgeMs = detailedStatsIntervalMs / 2)
+            if (result is ShellRunner.Outcome.Success) {
                 val snapshot = BatteryStatsParser.parseCheckin(result.output)
-                val awakeTime = snapshot.batteryRealtimeMs - (snapshot.doze?.deepIdleTimeMs ?: 0L)
-                val sleepTime = snapshot.doze?.deepIdleTimeMs ?: 0L
+                // Doze is an OS policy state, not CPU suspend time.
+                val awakeTime = snapshot.batteryUptimeMs.coerceIn(0, snapshot.batteryRealtimeMs.coerceAtLeast(0))
+                val sleepTime = (snapshot.batteryRealtimeMs - awakeTime).coerceAtLeast(0)
                 cachedAwakeTime = awakeTime
                 cachedDeepSleepTime = sleepTime
                 val reported = snapshot.estimatedCapacityMah.toDouble()
                 if (BatteryCapacity.isPlausible(reported)) {
-                    estimatedCapacityMah = reported
                     knownCapacityMah = reported
                 }
                 lastDumpsysTime = System.currentTimeMillis()

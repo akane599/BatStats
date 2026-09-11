@@ -30,7 +30,7 @@ object BatteryReader {
 
         return BatterySample(
             timestamp = System.currentTimeMillis(),
-            levelPercent = if (level >= 0 && scale > 0) (level * 100) / scale else 0,
+            levelPercent = batteryLevel(level, scale) ?: -1,
             status = intent.getIntExtra(
                 BatteryManager.EXTRA_STATUS,
                 BatteryManager.BATTERY_STATUS_UNKNOWN
@@ -38,9 +38,11 @@ object BatteryReader {
             plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0),
             currentNowUa = batteryManager?.let { currentNowUa(it) },
             chargeCounterUah = batteryManager
-                ?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER),
-            voltageMv = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0),
-            temperatureDeciC = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0),
+                ?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
+                ?.let(::batteryProperty)?.takeIf { it >= 0 },
+            voltageMv = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0).takeIf { it > 0 },
+            temperatureDeciC = if (intent.hasExtra(BatteryManager.EXTRA_TEMPERATURE))
+                intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) else null,
             health = intent.getIntExtra(
                 BatteryManager.EXTRA_HEALTH,
                 BatteryManager.BATTERY_HEALTH_UNKNOWN
@@ -50,12 +52,9 @@ object BatteryReader {
     }
 
     /** Some devices leave CURRENT_NOW empty and only populate the average. */
-    fun currentNowUa(batteryManager: BatteryManager): Long {
+    fun currentNowUa(batteryManager: BatteryManager): Long? {
         val now = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-        return if (now == 0L || now == Long.MIN_VALUE) {
-            batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
-        } else {
-            now
-        }
+        if (batteryProperty(now) != null && now != 0L) return now
+        return batteryCurrent(now, batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE))
     }
 }

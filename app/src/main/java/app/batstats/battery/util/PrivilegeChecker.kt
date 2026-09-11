@@ -32,10 +32,14 @@ object PrivilegeChecker {
         } catch (_: Throwable) {
             return false
         }
-        return mode == AppOpsManager.MODE_ALLOWED
+        return mode == AppOpsManager.MODE_ALLOWED ||
+            (mode == AppOpsManager.MODE_DEFAULT &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.PACKAGE_USAGE_STATS) == PackageManager.PERMISSION_GRANTED)
     }
 
-    fun hasAdvancedViaAdb(context: Context): Boolean = hasDump(context) || hasBatteryStats(context)
+    // BATTERY_STATS alone does not authorize dumpsys. Individual services may also
+    // require Usage Stats; preserve their denial text if that additional grant is absent.
+    fun hasAdvancedViaAdb(context: Context): Boolean = hasDump(context)
 
     suspend fun hasRoot(): Boolean = withContext(Dispatchers.IO) {
         RootStatsCollector.isRootAvailable()

@@ -375,7 +375,7 @@ private fun PrivilegeRequiredCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         StatusChip("Shizuku", hasShizuku)
                         StatusChip("ADB DUMP", hasAdb)
                         StatusChip("Root", hasRoot)
@@ -395,7 +395,7 @@ private fun PrivilegeRequiredCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = onRequestShizuku,
                             enabled = shizukuRunning && !hasShizuku
@@ -457,6 +457,7 @@ private fun AdbGrantCard(context: Context) {
         "adb shell pm grant $pkg android.permission.BATTERY_STATS",
         "adb shell pm grant $pkg android.permission.DUMP",
         "adb shell pm grant $pkg android.permission.PACKAGE_USAGE_STATS",
+        "adb shell appops set $pkg GET_USAGE_STATS allow",
         "adb shell pm grant $pkg android.permission.INTERACT_ACROSS_USERS",
         "adb shell settings put global hidden_api_policy 1  # optional"
     )

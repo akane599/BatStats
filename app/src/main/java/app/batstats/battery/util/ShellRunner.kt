@@ -104,16 +104,14 @@ class ShellRunner(
         }
 
         if (PrivilegeChecker.hasAdvancedViaAdb(context)) {
-            val out = runDirect(cmd)
-            if (usable(out)) {
-                Log.d(TAG, "run via ADB: $cmd (${out!!.length} chars)")
-                return@withContext Outcome.Success(out, Mode.ADB)
+            val direct = runDirect(cmd)
+            if (direct is Outcome.Success && usable(direct.output)) {
+                Log.d(TAG, "run via ADB: $cmd (${direct.output.length} chars)")
+                return@withContext direct
             }
-            Log.w(TAG, "Direct run empty or error: ${out?.take(200)}")
-            lastFailure = Outcome.Failure(
-                Mode.ADB,
-                "Granted DUMP/BATTERY_STATS but the command was refused"
-            )
+            lastFailure = direct as? Outcome.Failure
+                ?: Outcome.Failure(Mode.ADB, "ADB command returned no usable output")
+            Log.w(TAG, "Direct run failed: ${lastFailure.message}")
         }
 
         Log.w(TAG, "All runners failed for: $cmd")
@@ -122,10 +120,10 @@ class ShellRunner(
 
     suspend fun runDirectOnly(cmd: String): String? = withContext(Dispatchers.IO) {
         if (!PrivilegeChecker.hasAdvancedViaAdb(context)) return@withContext null
-        runDirect(cmd)?.takeIf { it.isNotBlank() && !isErrorOutput(it) }
+        (runDirect(cmd) as? Outcome.Success)?.output?.takeIf { it.isNotBlank() && !isErrorOutput(it) }
     }
 
-    private fun runDirect(cmd: String): String? {
+    private fun runDirect(cmd: String): Outcome {
         var process: Process? = null
         var watchdog: Thread? = null
         val timedOut = AtomicBoolean(false)
@@ -153,15 +151,17 @@ class ShellRunner(
 
             val out = p.inputStream.use { readShellOutput(it, 12 * 1024 * 1024) }
             val exitCode = p.waitFor()
+            val error = shellOutputError(out)
             when {
-                timedOut.get() || exitCode != 0 -> null
+                timedOut.get() -> Outcome.Failure(Mode.ADB, "Command timed out after $CMD_TIMEOUT_SEC seconds")
+                exitCode != 0 -> Outcome.Failure(Mode.ADB, error ?: "Command exited with status $exitCode")
                 // dumpsys exits 0 even when it refuses, so check the text as well.
-                out.contains("Permission Denial", ignoreCase = true) -> null
-                else -> out
+                error != null -> Outcome.Failure(Mode.ADB, error)
+                else -> Outcome.Success(out, Mode.ADB)
             }
         } catch (e: Exception) {
             Log.e(TAG, "runDirect exception", e)
-            null
+            Outcome.Failure(Mode.ADB, e.message ?: "Could not execute command")
         } finally {
             watchdog?.interrupt()
             runCatching { process?.destroy() }

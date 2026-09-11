@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -121,7 +122,7 @@ fun MainScreen(requestedScreen: Screen? = null, onNavigationHandled: () -> Unit 
                     rememberSaveableStateHolderNavEntryDecorator(),
                     rememberViewModelStoreNavEntryDecorator()
                 ),
-                modifier = Modifier.padding(bottom = padding.calculateBottomPadding())
+                modifier = Modifier.padding(bottom = padding.calculateBottomPadding()).consumeWindowInsets(padding)
             )
         }
             }

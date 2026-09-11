@@ -150,6 +150,7 @@ fun BatterySettingsScreen(
                 actions = {
                     IconButton(onClick = { showActions = true }) { Icon(Icons.Outlined.MoreVert, stringResource(R.string.settings_more)) }
                     DropdownMenu(expanded = showActions, onDismissRequest = { showActions = false }) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.data_export_import)) }, onClick = { showActions = false; onExportData() })
                         DropdownMenuItem(text = { Text(stringResource(R.string.export_settings)) }, onClick = { showActions = false; createSettingsBackup.launch("BatStats_Settings_Backup.json") })
                         DropdownMenuItem(text = { Text(stringResource(R.string.import_settings_desc)) }, onClick = { showActions = false; showImportDialog = true })
                         DropdownMenuItem(text = { Text(stringResource(R.string.reset_settings_desc)) }, onClick = { showActions = false; showResetDialog = true })

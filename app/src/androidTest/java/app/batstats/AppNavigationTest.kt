@@ -47,8 +47,27 @@ class AppNavigationTest {
         val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")
             ?.let(::File) ?: File(context.getExternalFilesDir(null), "screenshots")
         val output = File(directory, "$name.png")
-        output.parentFile!!.mkdirs()
-        output.outputStream().use { compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+        if (Build.VERSION.SDK_INT >= 31) {
+            // AGP creates its output directory as shell. Scoped storage can prevent the
+            // app UID from writing there, so transfer the capture through the test API.
+            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+            val pipes = automation.executeShellCommandRw("dd of=${output.absolutePath}")
+            ParcelFileDescriptor.AutoCloseInputStream(pipes[0]).use { response ->
+                ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use {
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+                response.readBytes()
+            }
+            ParcelFileDescriptor.AutoCloseInputStream(
+                automation.executeShellCommand("wc -c ${output.absolutePath}")
+            ).bufferedReader().use {
+                check(it.readText().trim().substringBefore(' ').toLongOrNull()?.let { size -> size > 0 } == true)
+            }
+        } else {
+            output.parentFile!!.mkdirs()
+            output.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        }
     }
 
     @After fun cleanup() {
@@ -91,7 +110,7 @@ class AppNavigationTest {
             // Preserve the scenario's launcher action/category so its lifecycle observer
             // can match onNewIntent and close the activity after this assertion.
             it.startActivity(Intent(it.intent)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra("open_drain_stats", true))
         }
         compose.onNodeWithText(text(R.string.drain_statistics)).assertIsDisplayed()
@@ -102,11 +121,14 @@ class AppNavigationTest {
         // leave the preceding tests able to exercise the ordinary no-access experience.
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val pkg = compose.activity.packageName
-        listOf("DUMP", "BATTERY_STATS").forEach { permission ->
+        listOf("DUMP", "BATTERY_STATS", "PACKAGE_USAGE_STATS", "INTERACT_ACROSS_USERS").forEach { permission ->
             ParcelFileDescriptor.AutoCloseInputStream(
                 automation.executeShellCommand("pm grant $pkg android.permission.$permission")
             ).bufferedReader().use { org.junit.Assert.assertTrue(it.readText().isBlank()) }
         }
+        ParcelFileDescriptor.AutoCloseInputStream(
+            automation.executeShellCommand("appops set $pkg GET_USAGE_STATS allow")
+        ).bufferedReader().use { org.junit.Assert.assertTrue(it.readText().isBlank()) }
         compose.onNodeWithTag("nav_stats").performClick()
         val collector = GlobalContext.get().get<DetailedStatsCollector>()
         compose.waitUntil(30_000) { collector.snapshot.value != null && !collector.isRefreshing.value }

@@ -161,14 +161,87 @@ class MonitorNotificationTest {
 
     private fun captureNotificationShade(name: String) {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        TestScreenshots.shell("cmd statusbar expand-notifications")
+        val originalFlags = automation.serviceInfo.flags
+        automation.serviceInfo = automation.serviceInfo.apply {
+            flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        }
+        val appName = context.getString(R.string.app_name)
+        val pause = context.getString(R.string.pause_monitoring)
+        fun descendants(root: android.view.accessibility.AccessibilityNodeInfo): List<android.view.accessibility.AccessibilityNodeInfo> {
+            val result = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
+            val queue = java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+            queue.add(root)
+            while (queue.isNotEmpty()) {
+                val node = queue.removeFirst()
+                result.add(node)
+                for (index in 0 until node.childCount) node.getChild(index)?.let(queue::addLast)
+            }
+            return result
+        }
+        fun shadeRoot() = automation.rootInActiveWindow
+            ?.takeIf { it.packageName?.toString() == "com.android.systemui" }
+        fun pauseVisible(root: android.view.accessibility.AccessibilityNodeInfo): Boolean =
+            descendants(root).any { it.isVisibleToUser && it.text?.toString()?.equals(pause, ignoreCase = true) == true }
+        fun expandOwnNotification(root: android.view.accessibility.AccessibilityNodeInfo): Boolean {
+            // Start at our app header so another app's expand button cannot be selected.
+            var node = descendants(root).firstOrNull {
+                it.isVisibleToUser && it.text?.toString()?.contains(appName, ignoreCase = true) == true
+            } ?: return false
+            repeat(7) {
+                if (node.actionList.any { it.id == android.view.accessibility.AccessibilityNodeInfo.ACTION_EXPAND }) {
+                    return node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_EXPAND)
+                }
+                val button = descendants(node).firstOrNull {
+                    it.isVisibleToUser && it.viewIdResourceName?.endsWith(":id/expand_button") == true &&
+                        it.contentDescription?.toString()?.contains("collapse", ignoreCase = true) != true
+                }
+                if (button != null && button.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) return true
+                // Reaching the row without an expand control means it is already expanded;
+                // never climb to the whole shade and click some other notification.
+                if (node.className?.toString()?.endsWith("ExpandableNotificationRow") == true) return false
+                node = node.parent ?: return false
+            }
+            return false
+        }
         try {
-            automation.waitForIdle(500, 5_000)
+            TestScreenshots.shell("cmd statusbar expand-notifications")
+            val deadline = android.os.SystemClock.uptimeMillis() + 15_000L
+            var lastExpansion = 0L
+            var expanded = false
+            while (android.os.SystemClock.uptimeMillis() < deadline) {
+                val root = shadeRoot()
+                if (root != null && pauseVisible(root)) {
+                    // Accessibility can update before the expansion animation is drawn.
+                    android.os.SystemClock.sleep(300L)
+                    if (shadeRoot()?.let(::pauseVisible) == true) { expanded = true; break }
+                }
+                val now = android.os.SystemClock.uptimeMillis()
+                if (root != null && now - lastExpansion >= 1_000L && expandOwnNotification(root)) lastExpansion = now
+                android.os.SystemClock.sleep(100L)
+            }
+            if (!expanded) {
+                automation.takeScreenshot()?.let { failed ->
+                    try { TestScreenshots.save("$name-failure", failed) } finally { failed.recycle() }
+                }
+                val visible = automation.rootInActiveWindow?.let(::descendants)?.filter { it.isVisibleToUser }
+                    ?.joinToString(" | ") { "${it.viewIdResourceName}: ${it.text} (${it.contentDescription})" }
+                fail("Expanded BatStats notification with Pause was not visible: ${visible?.take(8_000)}")
+            }
             val bitmap = requireNotNull(automation.takeScreenshot())
             try { TestScreenshots.save(name, bitmap) } finally { bitmap.recycle() }
         } finally {
-            TestScreenshots.shell("cmd statusbar collapse")
-            automation.waitForIdle(500, 5_000)
+            try {
+                TestScreenshots.shell("cmd statusbar collapse")
+                val deadline = android.os.SystemClock.uptimeMillis() + 8_000L
+                while (android.os.SystemClock.uptimeMillis() < deadline &&
+                    automation.rootInActiveWindow?.packageName?.toString() != context.packageName) {
+                    android.os.SystemClock.sleep(100L)
+                }
+                assertEquals("Notification shade must close before the next style switch", context.packageName,
+                    automation.rootInActiveWindow?.packageName?.toString())
+            } finally {
+                automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
+            }
         }
     }
 }

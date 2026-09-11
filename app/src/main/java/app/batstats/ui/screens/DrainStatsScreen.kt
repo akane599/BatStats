@@ -160,7 +160,8 @@ private fun CurrentStateCard(state: DrainState) {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
         )
     ) {
         Row(
@@ -272,45 +273,49 @@ private fun DrainRatesCard(state: DrainState) {
             
             Spacer(Modifier.height(16.dp))
             
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                DrainRateItem(
-                    capacityMah = state.capacityMah,
-                    icon = Icons.Outlined.Smartphone,
-                    label = stringResource(R.string.screen_on),
-                    rate = state.screenOnDrainRate,
-                    color = Color(0xFFFF9800)
-                )
-                DrainRateItem(
-                    capacityMah = state.capacityMah,
-                    icon = Icons.Outlined.PhonelinkErase,
-                    label = stringResource(R.string.screen_off),
-                    rate = state.screenOffDrainRate,
-                    color = Color(0xFF2196F3)
-                )
-                DrainRateItem(
-                    capacityMah = state.capacityMah,
-                    icon = Icons.Outlined.NightsStay,
-                    label = stringResource(R.string.deep_sleep),
-                    rate = state.deepSleepDrainRate,
-                    color = Color(0xFF4CAF50)
-                )
-                DrainRateItem(
-                    capacityMah = state.capacityMah,
-                    icon = Icons.Outlined.WbSunny,
-                    label = stringResource(R.string.awake),
-                    rate = state.awakeDrainRate,
-                    color = Color(0xFFE91E63)
-                )
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    maxItemsInEachRow = if (maxWidth < 480.dp) 2 else 4,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    DrainRateItem(
+                        capacityMah = state.capacityMah,
+                        icon = Icons.Outlined.Smartphone,
+                        label = stringResource(R.string.screen_on),
+                        rate = state.screenOnDrainRate,
+                        color = Color(0xFFFF9800)
+                    )
+                    DrainRateItem(
+                        capacityMah = state.capacityMah,
+                        icon = Icons.Outlined.PhonelinkErase,
+                        label = stringResource(R.string.screen_off),
+                        rate = state.screenOffDrainRate,
+                        color = Color(0xFF2196F3)
+                    )
+                    DrainRateItem(
+                        capacityMah = state.capacityMah,
+                        icon = Icons.Outlined.NightsStay,
+                        label = stringResource(R.string.deep_sleep),
+                        rate = state.deepSleepDrainRate,
+                        color = Color(0xFF4CAF50)
+                    )
+                    DrainRateItem(
+                        capacityMah = state.capacityMah,
+                        icon = Icons.Outlined.WbSunny,
+                        label = stringResource(R.string.awake),
+                        rate = state.awakeDrainRate,
+                        color = Color(0xFFE91E63)
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun RowScope.DrainRateItem(
+private fun FlowRowScope.DrainRateItem(
     capacityMah: Double,
     icon: ImageVector,
     label: String,
@@ -319,8 +324,7 @@ private fun RowScope.DrainRateItem(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        // An equal share of the row: four items sized to their own text used to overflow
-        // and push the last one into a one-character-per-line column.
+        // Two columns on phones leave room for rates and larger accessibility text.
         modifier = Modifier.weight(1f)
     ) {
         Surface(
@@ -340,7 +344,7 @@ private fun RowScope.DrainRateItem(
             formatDrainRate(rate),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            maxLines = 1
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
         val percent = formatBatteryPercentRate(rate, capacityMah)
         if (percent.isNotEmpty()) {
@@ -348,14 +352,14 @@ private fun RowScope.DrainRateItem(
                 percent,
                 style = MaterialTheme.typography.labelSmall,
                 color = color,
-                maxLines = 1
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
     }
 }

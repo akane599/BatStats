@@ -1976,15 +1976,19 @@ private fun StatRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth()
             .padding(vertical = if (LocalCompactStats.current) 0.dp else 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
     ) {
         Text(
             label,
+            modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
             value,
+            modifier = Modifier.weight(1f),
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium
         )

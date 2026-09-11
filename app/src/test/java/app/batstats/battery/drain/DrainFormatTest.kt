@@ -2,16 +2,22 @@ package app.batstats.battery.drain
 
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 
 class DrainFormatTest {
+    private lateinit var originalLocale: Locale
 
     @Before
     fun fixLocale() {
         // The formatters use the default locale; pin it so the decimal separator is stable.
+        originalLocale = Locale.getDefault()
         Locale.setDefault(Locale.US)
     }
+
+    @After fun restoreLocale() { Locale.setDefault(originalLocale) }
 
     @Test
     fun `power is expressed as a share of the battery`() {
@@ -30,17 +36,30 @@ class DrainFormatTest {
     @Test
     fun `a rate needs enough observed time before it means anything`() {
         // 9.8 mAh over two seconds extrapolates to ~17600 mA. Refuse rather than report it.
-        assertEquals(0.0, drainRateOver(9.8, 2_000L), 0.0001)
-        assertEquals(0.0, drainRateOver(9.8, MIN_RATE_WINDOW_MS - 1), 0.0001)
+        assertNull(drainRateOver(9.8, 2_000L))
+        assertNull(drainRateOver(9.8, MIN_RATE_WINDOW_MS - 1))
         // Once the window is long enough the arithmetic is the plain one.
-        assertEquals(60.0, drainRateOver(60.0, 3_600_000L), 0.0001)
+        assertEquals(60.0, requireNotNull(drainRateOver(60.0, 3_600_000L)), 0.0001)
     }
 
     @Test
     fun `a rate with no usable window reads as unknown, not as zero draw`() {
-        assertEquals("\u2014", formatDrainRate(0.0))
-        assertEquals("\u2014", formatDrainRateWithPercent(0.0, 5000.0))
+        assertEquals("\u2014", formatDrainRate(null))
+        assertEquals("\u2014", formatDrainRateWithPercent(null, 5000.0))
         assertEquals("< 0.1 mA", formatDrainRate(0.05))
+    }
+
+    @Test
+    fun `measured zero remains different from missing or invalid energy`() {
+        assertEquals(0.0, requireNotNull(drainRateOver(0.0, MIN_RATE_WINDOW_MS)), 0.0)
+        assertEquals("0 mA", formatDrainRate(0.0))
+        assertEquals("0 mA", formatDrainRateWithPercent(0.0, 5000.0))
+        assertEquals("0.0 mAh", formatMahWithPercent(0.0, 5000.0))
+        listOf(null, -1.0, Double.NaN, Double.POSITIVE_INFINITY).forEach { unavailable ->
+            assertNull(drainRateOver(unavailable, MIN_RATE_WINDOW_MS))
+            assertEquals("—", formatDrainRate(unavailable))
+            assertEquals("—", formatMahWithPercent(unavailable, 5000.0))
+        }
     }
 
     @Test
@@ -77,7 +96,8 @@ class DrainFormatTest {
         assertEquals("5.0%/h", formatDrainRatePreferPercent(250.0, 5000.0))
         // Without a capacity there is no share to show, so the mA reading stays.
         assertEquals("250 mA", formatDrainRatePreferPercent(250.0, 0.0))
-        assertEquals("—", formatDrainRatePreferPercent(0.0, 5000.0))
+        assertEquals("—", formatDrainRatePreferPercent(null, 5000.0))
+        assertEquals("0 mA", formatDrainRatePreferPercent(0.0, 5000.0))
     }
 
     @Test

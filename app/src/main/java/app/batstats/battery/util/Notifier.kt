@@ -9,38 +9,32 @@ import androidx.core.app.NotificationCompat
 import app.batstats.R
 import app.batstats.battery.BatteryMainActivity
 import app.batstats.battery.service.BatteryMonitorService
+import app.batstats.battery.drain.DrainNotificationReceiver
 
 object Notifier {
     private const val CH_ID = "battery_monitor"
 
-    /**
-     * Where the monitoring notification goes when "Show Persistent Notification" is off.
-     *
-     * A foreground service must show a notification - Android will not let it be removed -
-     * but a MIN-importance channel keeps it out of the status bar and folds it away in the
-     * shade, which is what someone turning that switch off is actually asking for. It needs
-     * a channel of its own because a channel's importance cannot be changed once created.
-     */
+    /** A quiet channel reduces prominence; Android still exposes the foreground service. */
     private const val CH_ID_QUIET = "battery_monitor_quiet"
 
     const val NOTIF_ID = 11
 
     fun ensureChannel(ctx: Context) {
         ensureChannel(ctx, visible = true)
-        }
+    }
 
     private fun ensureChannel(ctx: Context, visible: Boolean): String {
         val id = if (visible) CH_ID else CH_ID_QUIET
         val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (mgr.getNotificationChannel(id) == null) {
+        val name = ctx.getString(
+            if (visible) R.string.channel_battery_monitor else R.string.channel_battery_monitor_quiet
+        )
+        val existing = mgr.getNotificationChannel(id)
+        if (existing == null) {
             val ch = NotificationChannel(
                 id,
-                ctx.getString(
-                    if (visible) R.string.channel_battery_monitor
-                    else R.string.channel_battery_monitor_quiet
-                ),
-                if (visible) NotificationManager.IMPORTANCE_LOW
-                else NotificationManager.IMPORTANCE_MIN
+                name,
+                if (visible) NotificationManager.IMPORTANCE_LOW else NotificationManager.IMPORTANCE_MIN
             ).apply {
                 enableLights(false)
                 enableVibration(false)
@@ -48,6 +42,10 @@ object Notifier {
                 setShowBadge(false)
             }
             mgr.createNotificationChannel(ch)
+        } else if (existing.name.toString() != name) {
+            // Update corrected/localized wording without replacing the user's channel settings.
+            existing.name = name
+            mgr.createNotificationChannel(existing)
         }
         return id
     }
@@ -65,6 +63,7 @@ object Notifier {
             .setContentText(ctx.getString(R.string.tap_to_start))
             .setSmallIcon(android.R.drawable.ic_lock_idle_charging)
             .setAutoCancel(true)
+            .setContentIntent(pi)
             .addAction(android.R.drawable.ic_media_play, ctx.getString(R.string.start_monitoring), pi)
             .build()
         (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
@@ -75,15 +74,19 @@ object Notifier {
         ctx: Context,
         text: String,
         visible: Boolean = true,
-        details: String? = null
+        details: String? = null,
+        title: String? = null,
+        readingTime: Long? = null
     ): Notification {
         val channelId = ensureChannel(ctx, visible)
         val pi = PendingIntent.getActivity(
-            ctx, 0, Intent(ctx, BatteryMainActivity::class.java),
+            ctx, 0, Intent(ctx, BatteryMainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return NotificationCompat.Builder(ctx, channelId)
-            .setContentTitle(ctx.getString(R.string.monitoring_battery))
+            .setContentTitle(title ?: ctx.getString(R.string.monitoring_battery))
             .setContentText(text)
             .apply {
                 if (details != null) setStyle(NotificationCompat.BigTextStyle().bigText(details))
@@ -92,11 +95,23 @@ object Notifier {
             .setContentIntent(pi)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setWhen(readingTime ?: System.currentTimeMillis())
+            .setShowWhen(readingTime != null)
+            .addAction(android.R.drawable.ic_media_pause, ctx.getString(R.string.pause_monitoring), pauseIntent(ctx))
             .setPriority(
                 if (visible) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_MIN
             )
             .build()
     }
+
+    fun pauseIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
+        ctx,
+        2002,
+        Intent(ctx, DrainNotificationReceiver::class.java).setAction(DrainNotificationReceiver.ACTION_PAUSE),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
 
     fun notifyChargeLimit(ctx: Context, limit: Int) {
         ensureChannel(ctx)

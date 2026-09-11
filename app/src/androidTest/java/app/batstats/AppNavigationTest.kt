@@ -2,7 +2,6 @@ package app.batstats
 
 import android.Manifest
 import android.content.Intent
-import android.graphics.Bitmap
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -22,7 +21,6 @@ import org.junit.*
 import org.junit.runner.RunWith
 import org.junit.runners.MethodSorters
 import org.koin.core.context.GlobalContext
-import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
@@ -43,31 +41,7 @@ class AppNavigationTest {
     private fun text(id: Int) = compose.activity.getString(id)
     private fun screenshot(name: String) {
         compose.waitForIdle()
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")
-            ?.let(::File) ?: File(context.getExternalFilesDir(null), "screenshots")
-        val output = File(directory, "$name.png")
-        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
-        if (Build.VERSION.SDK_INT >= 31) {
-            // AGP creates its output directory as shell. Scoped storage can prevent the
-            // app UID from writing there, so transfer the capture through the test API.
-            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-            val pipes = automation.executeShellCommandRw("dd of=${output.absolutePath}")
-            ParcelFileDescriptor.AutoCloseInputStream(pipes[0]).use { response ->
-                ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use {
-                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
-                }
-                response.readBytes()
-            }
-            ParcelFileDescriptor.AutoCloseInputStream(
-                automation.executeShellCommand("wc -c ${output.absolutePath}")
-            ).bufferedReader().use {
-                check(it.readText().trim().substringBefore(' ').toLongOrNull()?.let { size -> size > 0 } == true)
-            }
-        } else {
-            output.parentFile!!.mkdirs()
-            output.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
-        }
+        TestScreenshots.save(name, compose.onRoot().captureToImage().asAndroidBitmap())
     }
 
     @After fun cleanup() {
@@ -85,6 +59,14 @@ class AppNavigationTest {
         compose.onNodeWithTag("nav_drain").performClick()
         compose.onNodeWithText(text(R.string.drain_statistics)).assertIsDisplayed()
         screenshot("drain")
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("screen_off_breakdown"))
+        compose.onNodeWithTag("screen_off_breakdown").assertIsDisplayed()
+        val inScreenOffBreakdown = hasAnyAncestor(hasTestTag("screen_off_breakdown"))
+        compose.onNode(hasText(text(R.string.screen_off_sleep_breakdown)) and inScreenOffBreakdown)
+            .assertIsDisplayed()
+        compose.onAllNodes(hasText(text(R.string.active)) and inScreenOffBreakdown).assertCountEquals(0)
+        compose.onAllNodes(hasText(text(R.string.idle)) and inScreenOffBreakdown).assertCountEquals(0)
+        screenshot("screen-off-breakdown")
         compose.onNodeWithTag("nav_stats").performClick()
         compose.waitForIdle()
         screenshot("stats")

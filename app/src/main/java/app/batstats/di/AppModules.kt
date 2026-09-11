@@ -97,7 +97,7 @@ val appModule = module {
     single { DataRetentionManager(get(), get()) }
     single { ForegroundDrainTracker(androidContext(), get(), get<BatteryDatabase>().appEnergyDao()) }
 
-    single { AdvancedDrainTracker(androidContext(), get(), get(), get(), get(), get()) }
+    single { AdvancedDrainTracker(androidContext(), get(), get(), get()) }
     single { DrainNotificationManager(androidContext(), get()) }
 
     single { AlertNotifier(androidContext()) }

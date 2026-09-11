@@ -13,8 +13,8 @@ data class DrainState(
     val timestamp: Long = System.currentTimeMillis(),
     
     // Current battery level
-    val batteryLevel: Int = 0,
-    val batteryLevelMah: Double = 0.0,
+    val batteryLevel: Int = -1,
+    val batteryLevelMah: Double? = null,
 
     /**
      * Full battery capacity, used to express drain as a share of the battery.
@@ -26,53 +26,46 @@ data class DrainState(
     // Device state
     val isScreenOn: Boolean = false,
     val isCharging: Boolean = false,
-    val isDeepSleep: Boolean = false,
+    val isPowered: Boolean = false,
+    val hasBatteryReading: Boolean = false,
     val isDozing: Boolean = false,
     
     // Cumulative drain by state (mAh)
-    val screenOnDrainMah: Double = 0.0,
-    val screenOffDrainMah: Double = 0.0,
-    val activeDrainMah: Double = 0.0,
-    val idleDrainMah: Double = 0.0,
-    val deepSleepDrainMah: Double = 0.0,
-    val awakeDrainMah: Double = 0.0,
+    val screenOnDrainMah: Double? = 0.0,
+    val screenOffDrainMah: Double? = 0.0,
     
     // Time spent in each state (ms)
     val screenOnTimeMs: Long = 0L,
     val screenOffTimeMs: Long = 0L,
-    val activeTimeMs: Long = 0L,
-    val idleTimeMs: Long = 0L,
     val deepSleepTimeMs: Long = 0L,
     val awakeTimeMs: Long = 0L,
     
     // Drain rates (mA) - calculated averages
-    val screenOnDrainRate: Double = 0.0,
-    val screenOffDrainRate: Double = 0.0,
-    val activeDrainRate: Double = 0.0,
-    val idleDrainRate: Double = 0.0,
-    val deepSleepDrainRate: Double = 0.0,
-    val awakeDrainRate: Double = 0.0,
+    val screenOnDrainRate: Double? = null,
+    val screenOffDrainRate: Double? = null,
     
     // Session tracking
+    val sessionElapsedMs: Long = 0L,
     val sessionStartTime: Long = System.currentTimeMillis(),
     val lastUpdateTime: Long = System.currentTimeMillis()
 ) : Parcelable {
     
-    val totalDrainMah: Double
-        get() = screenOnDrainMah + screenOffDrainMah
+    val totalDrainMah: Double?
+        get() = if (screenOnDrainMah != null && screenOffDrainMah != null)
+            screenOnDrainMah + screenOffDrainMah else null
     
-    /** Wall clock since the session began, including any time spent charging. */
+    /** Monotonic monitoring duration, including powered time; frozen when paused. */
     val totalTimeMs: Long
-        get() = (lastUpdateTime - sessionStartTime).coerceAtLeast(0L)
+        get() = sessionElapsedMs.coerceAtLeast(0L)
 
     /**
-     * Time actually accounted for. Charging stretches are excluded from the buckets - the
-     * battery was being refilled - so this is what the shares below divide by.
+     * Time actually accounted for. Powered stretches are excluded, even when battery
+     * protection pauses charging, so this is what the shares below divide by.
      */
     val trackedTimeMs: Long
         get() = screenOnTimeMs + screenOffTimeMs
 
-    val averageDrainRate: Double
+    val averageDrainRate: Double?
         get() = drainRateOver(totalDrainMah, trackedTimeMs)
 
     // The buckets reconcile by construction, so these are already within range; the clamp
@@ -80,6 +73,11 @@ data class DrainState(
     val screenOnPercentage: Float
         get() = if (trackedTimeMs > 0) {
             (screenOnTimeMs.toFloat() / trackedTimeMs * 100f).coerceIn(0f, 100f)
+        } else 0f
+
+    val screenOffPercentage: Float
+        get() = if (trackedTimeMs > 0) {
+            (screenOffTimeMs.toFloat() / trackedTimeMs * 100f).coerceIn(0f, 100f)
         } else 0f
 
     val deepSleepPercentage: Float
@@ -95,9 +93,10 @@ data class DrainState(
  */
 const val MIN_RATE_WINDOW_MS = 120_000L
 
-/** mAh over a window, expressed per hour. 0 while the window is too short to mean anything. */
-fun drainRateOver(drainMah: Double, timeMs: Long): Double =
-    if (timeMs >= MIN_RATE_WINDOW_MS) drainMah / (timeMs / 3600000.0) else 0.0
+/** Null means insufficient observation or an unavailable/reset charge counter. */
+fun drainRateOver(drainMah: Double?, timeMs: Long): Double? =
+    if (timeMs >= MIN_RATE_WINDOW_MS && drainMah != null && drainMah.isFinite() && drainMah >= 0.0)
+        drainMah / (timeMs / 3600000.0) else null
 
 /**
  * Snapshot of drain metrics at a point in time
@@ -106,27 +105,18 @@ fun drainRateOver(drainMah: Double, timeMs: Long): Double =
 data class DrainSnapshot(
     val timestamp: Long,
     val batteryLevel: Int,
-    val batteryMah: Double,
-    val currentMa: Int,
+    val batteryMah: Double?,
+    val currentMa: Int?,
     val isScreenOn: Boolean,
     val isCharging: Boolean,
-    val isDeepSleep: Boolean,
     val isDozing: Boolean,
     val cpuAwakeTimeMs: Long,
     val deepSleepTimeMs: Long
 )
 
-enum class DeviceState {
-    SCREEN_ON_ACTIVE,
-    SCREEN_ON_IDLE,
-    SCREEN_OFF_AWAKE,
-    SCREEN_OFF_DOZE,
-    SCREEN_OFF_DEEP_SLEEP,
-    CHARGING
-}
 
 fun formatDuration(ms: Long): String {
-    val seconds = ms / 1000
+    val seconds = ms.coerceAtLeast(0L) / 1000
     val minutes = seconds / 60
     val hours = minutes / 60
     val days = hours / 24
@@ -139,10 +129,10 @@ fun formatDuration(ms: Long): String {
     }
 }
 
-fun formatDrainRate(rate: Double): String {
+fun formatDrainRate(rate: Double?): String {
     return when {
-        // 0 means "not enough observed time yet", not "drawing nothing".
-        rate <= 0.0 -> "\u2014"
+        rate == null || !rate.isFinite() || rate < 0.0 -> "\u2014"
+        rate == 0.0 -> "0 mA"
         rate < 0.1 -> "< 0.1 mA"
         rate < 10 -> String.format(java.util.Locale.getDefault(), "%.1f mA", rate)
         else -> String.format(java.util.Locale.getDefault(), "%.0f mA", rate)
@@ -150,8 +140,8 @@ fun formatDrainRate(rate: Double): String {
 }
 
 /** Formats [mah] as a share of [capacityMah]; empty when the capacity is unknown. */
-fun formatBatteryPercent(mah: Double, capacityMah: Double): String {
-    if (capacityMah <= 0.0 || mah <= 0.0) return ""
+fun formatBatteryPercent(mah: Double?, capacityMah: Double): String {
+    if (!capacityMah.isFinite() || capacityMah <= 0.0 || mah == null || !mah.isFinite() || mah <= 0.0) return ""
     val percent = mah / capacityMah * 100.0
     return when {
         percent < 0.01 -> "< 0.01%"
@@ -161,20 +151,21 @@ fun formatBatteryPercent(mah: Double, capacityMah: Double): String {
 }
 
 /** Same, per hour - a drain rate in mA is mAh per hour. */
-fun formatBatteryPercentRate(ratePerHour: Double, capacityMah: Double): String {
+fun formatBatteryPercentRate(ratePerHour: Double?, capacityMah: Double): String {
     val percent = formatBatteryPercent(ratePerHour, capacityMah)
     return if (percent.isEmpty()) "" else "$percent/h"
 }
 
 /** "22.8 mAh · 0.5%", or just the mAh when the capacity is unknown. */
-fun formatMahWithPercent(mah: Double, capacityMah: Double): String {
+fun formatMahWithPercent(mah: Double?, capacityMah: Double): String {
+    if (mah == null || !mah.isFinite() || mah < 0.0) return "—"
     val value = String.format(java.util.Locale.getDefault(), "%.1f mAh", mah)
     val percent = formatBatteryPercent(mah, capacityMah)
     return if (percent.isEmpty()) value else "$value · $percent"
 }
 
 /** "45 mA · 1.1%/h", or just the rate when the capacity is unknown. */
-fun formatDrainRateWithPercent(rate: Double, capacityMah: Double): String {
+fun formatDrainRateWithPercent(rate: Double?, capacityMah: Double): String {
     val value = formatDrainRate(rate)
     val percent = formatBatteryPercentRate(rate, capacityMah)
     return if (percent.isEmpty()) value else "$value · $percent"
@@ -184,7 +175,7 @@ fun formatDrainRateWithPercent(rate: Double, capacityMah: Double): String {
  * "1.1%/h" - the share of the battery per hour, falling back to plain mA where the capacity
  * could not be established. For places with no room for both, like a notification line.
  */
-fun formatDrainRatePreferPercent(rate: Double, capacityMah: Double): String {
+fun formatDrainRatePreferPercent(rate: Double?, capacityMah: Double): String {
     val percent = formatBatteryPercentRate(rate, capacityMah)
     return if (percent.isEmpty()) formatDrainRate(rate) else percent
 }
@@ -195,7 +186,7 @@ fun formatDrainRatePreferPercent(rate: Double, capacityMah: Double): String {
  * always shown. Null when there is no capacity to measure against.
  */
 fun formatLevelRatePerHour(currentMa: Int, capacityMah: Double?): String? {
-    if (capacityMah == null || capacityMah <= 0.0 || currentMa == 0) return null
+    if (capacityMah == null || !capacityMah.isFinite() || capacityMah <= 0.0 || currentMa == 0) return null
     return String.format(
         java.util.Locale.getDefault(),
         "%+.1f%%/h",

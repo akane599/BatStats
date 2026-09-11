@@ -131,7 +131,10 @@ class DetailedStatsCollector(
                     _deviceIdle.value = BatteryStatsParser.parseDeviceIdle(idle.output)
                 }
 
-                is ShellRunner.Outcome.Failure -> Log.w(TAG, "deviceidle failed: ${idle.message}")
+                is ShellRunner.Outcome.Failure -> {
+                    _deviceIdle.value = null
+                    Log.w(TAG, "deviceidle failed: ${idle.message}")
+                }
             }
 
             // Power manager info.
@@ -140,7 +143,10 @@ class DetailedStatsCollector(
                     _powerManager.value = BatteryStatsParser.parsePowerManager(power.output)
                 }
 
-                is ShellRunner.Outcome.Failure -> Log.w(TAG, "power failed: ${power.message}")
+                is ShellRunner.Outcome.Failure -> {
+                    _powerManager.value = null
+                    Log.w(TAG, "power failed: ${power.message}")
+                }
             }
 
             if (hasData) {

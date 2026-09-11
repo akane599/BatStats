@@ -514,12 +514,12 @@ private fun SummaryCard(snapshot: BatteryStatsParser.FullSnapshot?) {
         if (snapshot == null) {
             Text(stringResource(R.string.no_data_available), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            val hours = snapshot.batteryRealtimeMs / 3600000.0
-            val screenHours = snapshot.screenOnTimeMs / 3600000.0
-
-            StatRow(stringResource(R.string.time_on_battery), String.format(Locale.getDefault(), "%.1f hours", hours))
-            StatRow(stringResource(R.string.screen_on_time), String.format(Locale.getDefault(), "%.1f hours", screenHours))
-            StatRow(stringResource(R.string.estimated_capacity), "${snapshot.estimatedCapacityMah} mAh")
+            Text(stringResource(R.string.statistics_accounting_note), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            StatRow(stringResource(R.string.time_on_battery), if (snapshot.batteryTimeAvailable) formatDuration(snapshot.batteryRealtimeMs) else "—")
+            StatRow(stringResource(R.string.screen_on_time), if (snapshot.screenTimeAvailable) formatDuration(snapshot.screenOnTimeMs) else "—")
+            StatRow(stringResource(R.string.estimated_capacity), snapshot.estimatedCapacityMah.takeIf { it > 0 }?.let { "$it mAh" } ?: "—")
             StatRow(stringResource(R.string.apps_tracked), "${snapshot.apps.size}")
             StatRow(stringResource(R.string.wakelocks), "${snapshot.wakelocks.size}")
             StatRow(stringResource(R.string.kernel_wakelocks_row), "${snapshot.kernelWakelocks.size}")
@@ -553,7 +553,7 @@ private fun DischargeBreakdownCard(snapshot: BatteryStatsParser.FullSnapshot?) {
 }
 
 @Composable
-private fun DischargeBox(label: String, percent: Float, color: Color) {
+private fun DischargeBox(label: String, percent: Float?, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
@@ -563,7 +563,7 @@ private fun DischargeBox(label: String, percent: Float, color: Color) {
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = String.format(Locale.getDefault(), "%.1f%%", percent),
+                text = percent?.let { String.format(Locale.getDefault(), "%.1f%%", it) } ?: "—",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = color
@@ -580,40 +580,26 @@ private fun ScreenTimeCard(snapshot: BatteryStatsParser.FullSnapshot?) {
         if (snapshot == null) {
             Text(stringResource(R.string.no_data_available), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            val totalMs = snapshot.batteryRealtimeMs.toFloat().coerceAtLeast(1f)
-            val screenOnPercent = (snapshot.screenOnTimeMs / totalMs * 100)
-            val screenOffPercent = 100f - screenOnPercent
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.screen_on), style = MaterialTheme.typography.labelMedium)
-                    LinearWavyProgressIndicator(
-                        progress = { screenOnPercent / 100f },
-                        modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        String.format(Locale.getDefault(), "%.1f%% of battery time", screenOnPercent),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            val share = snapshot.screenOnBatteryShare
+            if (share != null) {
+                Text(stringResource(R.string.screen_on), style = MaterialTheme.typography.labelMedium)
+                LinearWavyProgressIndicator(
+                    progress = { share },
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    stringResource(R.string.screen_battery_share_format, share * 100f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(stringResource(R.string.no_data_available), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-
             Spacer(Modifier.height(12.dp))
-
-            val drainPerHourScreenOn = if (snapshot.screenOnTimeMs > 0) {
-                snapshot.screenOnDischargePercent / (snapshot.screenOnTimeMs / 3600000.0)
-            } else 0.0
-            val drainPerHourScreenOff = if (snapshot.batteryRealtimeMs - snapshot.screenOnTimeMs > 0) {
-                snapshot.screenOffDischargePercent / ((snapshot.batteryRealtimeMs - snapshot.screenOnTimeMs) / 3600000.0)
-            } else 0.0
-
-            StatRow(stringResource(R.string.drain_per_hour_screen_on), String.format(Locale.getDefault(), "%.2f%%", drainPerHourScreenOn))
-            StatRow(stringResource(R.string.drain_per_hour_screen_off), String.format(Locale.getDefault(), "%.2f%%", drainPerHourScreenOff))
+            fun rate(value: Double?) = value?.let { String.format(Locale.getDefault(), "%.2f%%/h", it) } ?: "—"
+            StatRow(stringResource(R.string.drain_per_hour_screen_on), rate(snapshot.screenOnDrainPerHour))
+            StatRow(stringResource(R.string.drain_per_hour_screen_off), rate(snapshot.screenOffDrainPerHour))
         }
     }
 }
@@ -705,8 +691,10 @@ private fun DozeStatsCard(doze: BatteryStatsParser.DozeStats?) {
             StatRow(stringResource(R.string.deep_doze_count), "${doze.deepIdleCount}")
             StatRow(stringResource(R.string.light_doze_time), formatDuration(doze.lightIdleTimeMs))
             StatRow(stringResource(R.string.light_doze_count), "${doze.lightIdleCount}")
-            StatRow(stringResource(R.string.maintenance_windows), "${doze.maintenanceCount}")
-            StatRow(stringResource(R.string.maintenance_time), formatDuration(doze.maintenanceTimeMs))
+            StatRow(stringResource(R.string.device_full_idling_time), formatDuration(doze.deviceIdlingTimeMs))
+            StatRow(stringResource(R.string.device_full_idling_periods), "${doze.deviceIdlingCount}")
+            Text(stringResource(R.string.device_full_idling_note), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -733,20 +721,22 @@ private fun CurrentStateCard(
     deviceIdle: BatteryStatsParser.DeviceIdleInfo?,
     powerManager: BatteryStatsParser.PowerManagerInfo?
 ) {
-    StatsCard(title = stringResource(R.string.current_state), icon = Icons.Outlined.Info) {
+    StatsCard(title = stringResource(R.string.last_observed_state), icon = Icons.Outlined.Info) {
         if (deviceIdle != null) {
             StatRow(stringResource(R.string.doze_state), deviceIdle.currentState)
             StatRow(stringResource(R.string.light_state), deviceIdle.lightState)
-            StatRow(stringResource(R.string.deep_doze_enabled), stringResource(if (deviceIdle.deepEnabled) R.string.yes else R.string.no))
-            StatRow(stringResource(R.string.light_doze_enabled), stringResource(if (deviceIdle.lightEnabled) R.string.yes else R.string.no))
+            StatRow(stringResource(R.string.deep_doze_enabled), nullableState(deviceIdle.deepEnabled))
+            StatRow(stringResource(R.string.light_doze_enabled), nullableState(deviceIdle.lightEnabled))
         }
 
         if (powerManager != null) {
             Spacer(Modifier.height(8.dp))
-            StatRow(stringResource(R.string.screen), stringResource(if (powerManager.isScreenOn) R.string.on else R.string.off))
-            StatRow(stringResource(R.string.battery_level_label), "${powerManager.batteryLevel}%")
-            StatRow(stringResource(R.string.battery_status), powerManager.batteryStatus)
-            StatRow(stringResource(R.string.low_power_mode), stringResource(if (powerManager.lowPowerMode) R.string.yes else R.string.no))
+            StatRow(stringResource(R.string.screen), nullableState(powerManager.isScreenOn, R.string.on, R.string.off))
+            StatRow(stringResource(R.string.battery_level_label), powerManager.batteryLevel?.let { "$it%" } ?: "—")
+            StatRow(stringResource(R.string.battery_status), powerManager.batteryStatus ?: stringResource(R.string.unknown_value))
+            StatRow(stringResource(R.string.external_power_label), nullableState(powerManager.isPowered,
+                R.string.external_power_connected, R.string.external_power_disconnected))
+            StatRow(stringResource(R.string.low_power_mode), nullableState(powerManager.lowPowerMode))
             StatRow(stringResource(R.string.device_idle_mode), powerManager.deviceIdleMode)
 
             if (powerManager.holdingWakeLocks.isNotEmpty()) {
@@ -1525,7 +1515,7 @@ private fun RootTab(
                     )
                     Text(
                         "These statistics require root access to read kernel-level battery information, " +
-                                "including cycle count, true battery capacity, kernel wakelocks, and thermal data.",
+                                "including cycle count, gauge-reported capacity, kernel wakelocks, and thermal data when available.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1538,8 +1528,8 @@ private fun RootTab(
                             Spacer(Modifier.height(4.dp))
                             listOf(
                                 "Battery cycle count",
-                                "True capacity (design vs actual)",
-                                "Battery age/health percentage",
+                                "Gauge-reported full and design capacity",
+                                "Reported full/design capacity ratio",
                                 "Kernel wakelocks (native)",
                                 "CPU frequency states",
                                 "Thermal zone monitoring",
@@ -1644,37 +1634,22 @@ private fun BatteryHealthCard(battery: RootStatsCollector.KernelBatteryInfo?) {
                             "$cycles cycles",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
-                            color = when {
-                                cycles < 300 -> MaterialTheme.colorScheme.primary
-                                cycles < 500 -> MaterialTheme.colorScheme.tertiary
-                                else -> MaterialTheme.colorScheme.error
-                            }
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
-
-                    // Health indicator
-                    val healthPercent = when {
-                        cycles < 100 -> 100
-                        cycles < 300 -> 90
-                        cycles < 500 -> 75
-                        cycles < 800 -> 60
-                        else -> 40
-                    }
-                    CircularWavyProgressIndicator(
-                        progress = { healthPercent / 100f },
-                        modifier = Modifier.size(48.dp),
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
                 }
 
                 Spacer(Modifier.height(12.dp))
             }
 
-            // Capacity comparison
-            if (battery.chargeFullDesign != null && battery.chargeFull != null) {
+            Text(stringResource(R.string.root_capacity_note), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            // Only the gauge's reported full/design capacities establish this ratio.
+            if (battery.chargeFullDesign != null && battery.chargeFull != null && battery.batteryAge != null) {
                 val designMah = battery.chargeFullDesign / 1000
                 val actualMah = battery.chargeFull / 1000
-                val healthPct = battery.batteryAge ?: 0.0
+                val healthPct = battery.batteryAge
 
                 Text(stringResource(R.string.capacity), style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.height(4.dp))
@@ -1688,11 +1663,11 @@ private fun BatteryHealthCard(battery: RootStatsCollector.KernelBatteryInfo?) {
                         Text("$designMah mAh", style = MaterialTheme.typography.bodyMedium)
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(stringResource(R.string.current), style = MaterialTheme.typography.labelSmall)
+                        Text(stringResource(R.string.reported_full_capacity), style = MaterialTheme.typography.labelSmall)
                         Text("$actualMah mAh", style = MaterialTheme.typography.bodyMedium)
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(stringResource(R.string.health), style = MaterialTheme.typography.labelSmall)
+                        Text(stringResource(R.string.capacity_ratio), style = MaterialTheme.typography.labelSmall)
                         Text(
                             String.format(Locale.getDefault(), "%.1f%%", healthPct),
                             style = MaterialTheme.typography.bodyMedium,
@@ -2048,3 +2023,11 @@ private fun formatBytes(bytes: Long): String {
     val gb = mb / 1024.0
     return String.format(Locale.getDefault(), "%.2f GB", gb)
 }
+
+@Composable
+private fun nullableState(value: Boolean?, trueText: Int = R.string.yes, falseText: Int = R.string.no): String =
+    stringResource(when (value) {
+        true -> trueText
+        false -> falseText
+        null -> R.string.unknown_value
+    })

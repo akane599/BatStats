@@ -31,6 +31,7 @@ data class AppSettings(
 
     @Setting(
         title = "Show Persistent Notification",
+        description = "When off, use a quiet notification. Android still shows that monitoring is running.",
         category = General::class,
         type = Toggle::class,
         key = "show_notification"
@@ -39,7 +40,7 @@ data class AppSettings(
 
     @Setting(
         title = "Show Drain Stats Notification",
-        description = "Show detailed drain statistics in notification (requires Shizuku, Root or ADB)",
+        description = "Show recorded screen-on/off drain instead of battery readings. No special access is needed.",
         category = General::class,
         type = Toggle::class,
         key = "show_drain_notification"
@@ -48,6 +49,7 @@ data class AppSettings(
 
     @Setting(
         title = "Notification Style",
+        description = "Applies to both battery and drain notifications.",
         category = General::class,
         type = Dropdown::class,
         options = ["Minimal", "Compact", "Detailed"],

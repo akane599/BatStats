@@ -3,6 +3,7 @@ package app.batstats.battery.drain
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import app.batstats.battery.service.BatteryMonitorService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -15,12 +16,19 @@ import org.koin.core.component.inject
  */
 class DrainNotificationReceiver : BroadcastReceiver(), KoinComponent {
     companion object {
+        const val ACTION_PAUSE = "app.batstats.battery.drain.ACTION_PAUSE"
         const val ACTION_RESET = "app.batstats.battery.drain.ACTION_RESET"
     }
 
     private val drainTracker: AdvancedDrainTracker by inject()
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == ACTION_PAUSE) {
+            // Explicit, immutable PendingIntent; the non-exported receiver only stops this
+            // service. Pausing keeps the session available for review in the app.
+            context.stopService(Intent(context, BatteryMonitorService::class.java))
+            return
+        }
         if (intent.action != ACTION_RESET) return
 
         // The process becomes killable the moment onReceive returns, so work launched into

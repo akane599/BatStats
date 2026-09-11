@@ -150,6 +150,27 @@ class MonitorNotificationTest {
             .contains(context.getString(R.string.charging_paused)))
         assertEquals(listOf(context.getString(R.string.reset_action)),
             emptySession.actions.orEmpty().map { it.title.toString() })
+
+        val invertedUnplugged = MonitorNotificationText.from(
+            context,
+            sample.copy(status = BatteryManager.BATTERY_STATUS_DISCHARGING, plugged = 0,
+                currentNowUa = 900_000, voltageMv = 5_000),
+            NotificationStyle.COMPACT,
+            useFahrenheit = false
+        )
+        assertTrue(invertedUnplugged.text.contains(
+            context.getString(R.string.notif_current_out, "900 mA")
+        ))
+        val invertedCharging = MonitorNotificationText.from(
+            context,
+            sample.copy(status = BatteryManager.BATTERY_STATUS_CHARGING,
+                currentNowUa = -900_000, voltageMv = 5_000),
+            NotificationStyle.COMPACT,
+            useFahrenheit = false
+        )
+        assertTrue(invertedCharging.text.contains(
+            context.getString(R.string.notif_current_in, "900 mA")
+        ))
     }
 
     private fun monitor(): Notification? = notifications.activeNotifications

@@ -22,10 +22,15 @@ internal data class MonitorNotificationText(val title: String, val text: String,
             if (style == NotificationStyle.MINIMAL) return MonitorNotificationText(title, level, null)
             val magnitude = formatMonitorCurrentMagnitude(reading.currentMa)
             val direction = when {
-                reading.currentMa == null -> magnitude
+                reading.currentMa == null || reading.currentMa == 0.0 -> magnitude
+                // Some devices invert CURRENT_NOW. The cable/status state is a stronger
+                // source of truth than its sign when it unambiguously identifies flow.
+                reading.status == MonitorStatus.ON_BATTERY ->
+                    context.getString(R.string.notif_current_out, magnitude)
+                reading.status == MonitorStatus.CHARGING ->
+                    context.getString(R.string.notif_current_in, magnitude)
                 reading.currentMa < 0 -> context.getString(R.string.notif_current_out, magnitude)
-                reading.currentMa > 0 -> context.getString(R.string.notif_current_in, magnitude)
-                else -> magnitude
+                else -> context.getString(R.string.notif_current_in, magnitude)
             }
             val temperature = formatMonitorValue(
                 reading.temperatureC?.let { if (useFahrenheit) it * 9.0 / 5.0 + 32 else it },
